@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Nuevo pipeline{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'simulator:project_detail' project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ project.name }}
+  </a>
+  <h3 class="mt-1">Nuevo pipeline</h3>
+  <p class="text-muted small">
+    Un pipeline ejecuta modelos en cadena: la salida de cada modelo actualiza la hoja SOURCES del siguiente.
+  </p>
+</div>
+
+<form method="post" id="pipeline-form">
+  {% csrf_token %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Nombre del pipeline</label>
+        {{ form.name }}
+      </div>
+    </div>
+  </div>
+
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-semibold"><i class="bi bi-list-ol"></i> Pasos del pipeline</span>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="addStep()">
+        <i class="bi bi-plus-lg"></i> Agregar paso
+      </button>
+    </div>
+    <div class="card-body">
+      <div id="steps-container"></div>
+      <p class="text-muted small mt-2">
+        <i class="bi bi-info-circle"></i>
+        El primer paso no requiere vertimiento. En los pasos siguientes, selecciona
+        el vertimiento a actualizar en esa ejecución y el punto de conexión
+        (fuente del modelo anterior cuyas salidas se tomarán como entrada).
+      </p>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save"></i> Crear pipeline
+    </button>
+    <a href="{% url 'simulator:project_detail' project.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// All available runs for this project
+const RUNS = [
+  {% for run in available_runs %}
+  {pk: {{ run.pk }}, name: "{{ run.name }}", status: "{{ run.status }}"},
+  {% endfor %}
+];
+
+// Base URL template for sources API
+const SOURCES_URL = "{% url 'simulator:run_sources_api' 0 %}".replace('/0/', '/RUNPK/');
+
+// Cache: runPk -> [{nombre, x_qual2k, fila}]
+const sourcesCache = {};
+
+let stepCount = 0;
+
+// stepData[i] = selected run pk for step i
+const stepRunPk = {};
+
+async function fetchSources(runPk) {
+  if (sourcesCache[runPk]) return sourcesCache[runPk];
+  try {
+    const resp = await fetch(SOURCES_URL.replace('RUNPK', runPk));
+    const data = await resp.json();
+    sourcesCache[runPk] = data.sources || [];
+  } catch(e) {
+    sourcesCache[runPk] = [];
+  }
+  return sourcesCache[runPk];
+}
+
+function addStep() {
+  const container = document.getElementById('steps-container');
+  const i = stepCount++;
+  const isFirst = (i === 0);
+
+  const runOpts = RUNS.map(r => {
+    const label = r.status === 'done' ? r.name : `${r.name} (${r.status})`;
+    return `<option value="${r.pk}">${label}</option>`;
+  }).join('');
+
+  const div = document.createElement('div');
+  div.className = 'border rounded p-3 mb-3 bg-light';
+  div.id = `step-${i}`;
+  div.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <strong><i class="bi bi-circle-fill text-primary me-1" style="font-size:.6rem"></i> Paso ${i + 1}</strong>
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeStep('step-${i}', ${i})">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+    <div class="row g-3">
+      <!-- Run select -->
+      <div class="col-md-4">
+        <label class="form-label small fw-semibold">Ejecución</label>
+        <select name="run_${i}" id="run-sel-${i}" class="form-select form-select-sm" required
+                onchange="onRunChange(${i}, this.value)">
+          <option value="">— Selecciona —</option>${runOpts}
+        </select>
+      </div>
+
+      <!-- Vertimiento a actualizar (from THIS run's sources) -->
+      <div class="col-md-4 ${isFirst ? 'd-none' : ''}" id="col-vert-${i}">
+        <label class="form-label small fw-semibold">
+          Vertimiento a actualizar
+          <span class="text-muted fw-normal">(en esta ejecución)</span>
+        </label>
+        <select name="vertimiento_${i}" id="vert-sel-${i}" class="form-select form-select-sm">
+          <option value="">— Selecciona ejecución primero —</option>
+        </select>
+      </div>
+
+      <!-- Punto de conexión (from PREVIOUS run's sources → auto-fills fila) -->
+      <div class="col-md-4 ${isFirst ? 'd-none' : ''}" id="col-fila-${i}">
+        <label class="form-label small fw-semibold">
+          Punto de conexión
+          <span class="text-muted fw-normal">(salida del paso anterior)</span>
+        </label>
+        <select id="fila-sel-${i}" class="form-select form-select-sm"
+                onchange="onFilaSourceChange(${i})">
+          <option value="">— Selecciona paso anterior primero —</option>
+        </select>
+        <input type="hidden" name="fila_${i}" id="fila-val-${i}" value="0">
+        <div id="fila-info-${i}" class="form-text text-muted small"></div>
+      </div>
+
+      <!-- Hidden blank vertimiento for first step -->
+      ${isFirst ? `<input type="hidden" name="vertimiento_${i}" value=""><input type="hidden" name="fila_${i}" value="0">` : ''}
+    </div>
+  `;
+  container.appendChild(div);
+}
+
+async function onRunChange(stepIdx, runPk) {
+  stepRunPk[stepIdx] = runPk || null;
+
+  // Update vertimiento dropdown for this step
+  const vertSel = document.getElementById(`vert-sel-${stepIdx}`);
+  if (vertSel) {
+    if (!runPk) {
+      vertSel.innerHTML = '<option value="">— Selecciona ejecución primero —</option>';
+    } else {
+      const sources = await fetchSources(runPk);
+      vertSel.innerHTML = '<option value="">— Selecciona vertimiento —</option>' +
+        sources.map(s => `<option value="${s.nombre}">${s.nombre}${s.x_qual2k != null ? ' (km ' + s.x_qual2k + ')' : ''}</option>`).join('');
+    }
+  }
+
+  // Update fila dropdown for the NEXT step (which uses this step's run as source)
+  const nextFilaSel = document.getElementById(`fila-sel-${stepIdx + 1}`);
+  if (nextFilaSel) {
+    await refreshFilaDropdown(stepIdx + 1);
+  }
+}
+
+async function refreshFilaDropdown(stepIdx) {
+  const prevRunPk = stepRunPk[stepIdx - 1];
+  const filaSel = document.getElementById(`fila-sel-${stepIdx}`);
+  const filaInfo = document.getElementById(`fila-info-${stepIdx}`);
+  if (!filaSel) return;
+
+  if (!prevRunPk) {
+    filaSel.innerHTML = '<option value="">— Selecciona el paso anterior primero —</option>';
+    return;
+  }
+
+  const sources = await fetchSources(prevRunPk);
+  if (sources.length === 0) {
+    filaSel.innerHTML = '<option value="">— Sin fuentes disponibles —</option>';
+    return;
+  }
+
+  const hasFila = sources.some(s => s.fila !== null);
+  filaSel.innerHTML = '<option value="">— Selecciona punto de conexión —</option>' +
+    sources.map(s => {
+      const kmLabel = s.x_qual2k != null ? ` km ${s.x_qual2k}` : '';
+      const filaLabel = s.fila !== null ? ` → fila ${s.fila}` : '';
+      return `<option value="${s.fila !== null ? s.fila : 0}" data-fila="${s.fila}"
+                data-nombre="${s.nombre}">${s.nombre}${kmLabel}${filaLabel}</option>`;
+    }).join('');
+
+  if (filaInfo) {
+    filaInfo.textContent = hasFila
+      ? 'Fila calculada automáticamente desde el CSV de resultados.'
+      : 'La ejecución anterior aún no tiene resultados; fila = 0 por defecto.';
+  }
+}
+
+function onFilaSourceChange(stepIdx) {
+  const filaSel = document.getElementById(`fila-sel-${stepIdx}`);
+  const filaVal = document.getElementById(`fila-val-${stepIdx}`);
+  if (!filaSel || !filaVal) return;
+  const opt = filaSel.options[filaSel.selectedIndex];
+  filaVal.value = (opt && filaSel.value !== '') ? filaSel.value : '0';
+}
+
+function removeStep(id, idx) {
+  document.getElementById(id)?.remove();
+  delete stepRunPk[idx];
+}
+
+// Start with 2 steps
+addStep(); addStep();
+</script>
+{% endblock %}

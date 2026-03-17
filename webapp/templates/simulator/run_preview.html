@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% block title %}Previsualizar datos — {{ run.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'simulator:project_detail' project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ project.name }}
+  </a>
+  <div class="d-flex align-items-center justify-content-between mt-1">
+    <div>
+      <h3 class="mb-0">Paso 1b: Previsualizar y editar datos</h3>
+      <p class="text-muted small mb-0">Revisa los datos cargados. Puedes editar celdas, añadir o eliminar filas antes de continuar.</p>
+    </div>
+    <a href="{% url 'simulator:run_edit_input' run.pk %}" class="btn btn-sm btn-outline-warning">
+      <i class="bi bi-upload"></i> Cambiar archivo
+    </a>
+  </div>
+</div>
+
+{% if load_error %}
+<div class="alert alert-danger">
+  <i class="bi bi-exclamation-triangle"></i> Error al leer el archivo: {{ load_error }}
+</div>
+{% endif %}
+
+{% if messages %}
+{% for msg in messages %}
+<div class="alert alert-{{ msg.tags }} alert-dismissible fade show">
+  {{ msg }} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endfor %}
+{% endif %}
+
+<form method="post" id="preview-form">
+  {% csrf_token %}
+  <input type="hidden" name="reaches_json" id="reaches_json_input">
+  <input type="hidden" name="sources_json" id="sources_json_input">
+  <input type="hidden" name="wqdata_json"  id="wqdata_json_input">
+
+  <!-- Sheet tabs -->
+  <ul class="nav nav-tabs mb-0" id="sheetTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-reaches-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-reaches" type="button" role="tab">
+        <i class="bi bi-diagram-3"></i> REACHES
+        <span class="badge bg-secondary ms-1" id="badge-reaches">0</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-sources-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-sources" type="button" role="tab">
+        <i class="bi bi-geo-alt"></i> SOURCES
+        <span class="badge bg-secondary ms-1" id="badge-sources">0</span>
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-wqdata-btn" data-bs-toggle="tab"
+              data-bs-target="#tab-wqdata" type="button" role="tab">
+        <i class="bi bi-water"></i> WQ_DATA
+        <span class="badge bg-secondary ms-1" id="badge-wqdata">0</span>
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content border border-top-0 rounded-bottom mb-4">
+
+    <!-- REACHES -->
+    <div class="tab-pane fade show active p-3" id="tab-reaches" role="tabpanel">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="text-muted small">Tramos del río — una fila por tramo.</span>
+        <button type="button" class="btn btn-sm btn-outline-success" onclick="addRow('reaches')">
+          <i class="bi bi-plus-circle"></i> Añadir fila
+        </button>
+      </div>
+      <div id="table-reaches" class="table-responsive" style="max-height:380px; overflow-y:auto;"></div>
+    </div>
+
+    <!-- SOURCES -->
+    <div class="tab-pane fade p-3" id="tab-sources" role="tabpanel">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <span class="text-muted small">Fuentes puntuales — vertimientos y captaciones.</span>
+          <div class="btn-group btn-group-sm" id="sources-filter-btns" role="group">
+            <button type="button" class="btn btn-outline-secondary active" data-filter="" onclick="filterSources(this)">Todos</button>
+            <button type="button" class="btn btn-outline-danger" data-filter="VERTIMIENTO" onclick="filterSources(this)">Vertimientos</button>
+            <button type="button" class="btn btn-outline-primary" data-filter="CAPTACION" onclick="filterSources(this)">Captaciones</button>
+          </div>
+        </div>
+        <button type="button" class="btn btn-sm btn-outline-success" onclick="addRow('sources')">
+          <i class="bi bi-plus-circle"></i> Añadir fila
+        </button>
+      </div>
+      <div id="table-sources" class="table-responsive" style="max-height:380px; overflow-y:auto;"></div>
+    </div>
+
+    <!-- WQ_DATA -->
+    <div class="tab-pane fade p-3" id="tab-wqdata" role="tabpanel">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <span class="text-muted small">Datos de calidad observados — primera fila debe ser CABECERA.</span>
+        <button type="button" class="btn btn-sm btn-outline-success" onclick="addRow('wqdata')">
+          <i class="bi bi-plus-circle"></i> Añadir fila
+        </button>
+      </div>
+      <div id="table-wqdata" class="table-responsive" style="max-height:380px; overflow-y:auto;"></div>
+    </div>
+
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-success" onclick="return serializeAll()">
+      <i class="bi bi-arrow-right-circle"></i> Guardar y continuar con configuración
+    </button>
+    <a href="{% url 'simulator:project_detail' project.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── Data injected by Django ───────────────────────────────────────────────────
+const SHEETS = {
+  reaches: {{ reaches_json|safe }},
+  sources: {{ sources_json|safe }},
+  wqdata:  {{ wqdata_json|safe }},
+};
+// Column names per sheet (populated on buildTable)
+const SHEET_COLS = { reaches: [], sources: [], wqdata: [] };
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// ── Table builder ─────────────────────────────────────────────────────────────
+function buildTable(key) {
+  let data = SHEETS[key];
+  if (key === 'sources' && data.length > 0) {
+    data = [...data].sort((a, b) => (parseFloat(b['X_QUAL2K']) || 0) - (parseFloat(a['X_QUAL2K']) || 0));
+    SHEETS[key] = data;
+  }
+  const container = document.getElementById('table-' + key);
+  const badge     = document.getElementById('badge-' + key);
+
+  if (!data || data.length === 0) {
+    container.innerHTML = '<p class="text-muted small py-2">Sin datos. Usa "Añadir fila" para empezar.</p>';
+    badge.textContent = '0';
+    return;
+  }
+
+  const cols = Object.keys(data[0]);
+  SHEET_COLS[key] = cols;
+  badge.textContent = data.length;
+
+  let html = `<table class="table table-bordered table-sm mb-0 align-middle" id="tbl-${key}">`;
+  // Header
+  html += '<thead class="table-light"><tr>';
+  html += '<th class="text-center fw-normal text-muted" style="width:38px">#</th>';
+  cols.forEach(col => {
+    html += `<th class="small text-nowrap fw-semibold px-2" title="${esc(col)}">${esc(col)}</th>`;
+  });
+  html += '<th style="width:38px"></th>';
+  html += '</tr></thead>';
+  // Body
+  html += `<tbody id="tbody-${key}">`;
+  data.forEach((row, i) => { html += rowHtml(key, i, row, cols); });
+  html += '</tbody></table>';
+
+  container.innerHTML = html;
+}
+
+// Columns that render as <select> instead of <input>
+const SELECT_COLS = {
+  sources: {
+    TIPO: ['VERTIMIENTO', 'CAPTACION'],
+  },
+};
+
+function cellHtml(key, col, v) {
+  const selOpts = (SELECT_COLS[key] || {})[col];
+  if (selOpts) {
+    let opts = selOpts.map(opt =>
+      `<option value="${esc(opt)}"${String(v).toUpperCase() === opt ? ' selected' : ''}>${opt}</option>`
+    ).join('');
+    return `<td class="p-1">
+      <select class="form-select form-select-sm px-1" style="min-width:130px" data-col="${esc(col)}">
+        ${opts}
+      </select>
+    </td>`;
+  }
+  return `<td class="p-1">
+    <input type="text" class="form-control form-control-sm px-1"
+           style="min-width:85px" data-col="${esc(col)}" value="${esc(String(v))}">
+  </td>`;
+}
+
+function rowHtml(key, idx, row, cols) {
+  let h = '<tr>';
+  h += `<td class="text-center text-muted small">${idx + 1}</td>`;
+  cols.forEach(col => {
+    const v = (row && row[col] !== null && row[col] !== undefined) ? row[col] : '';
+    h += cellHtml(key, col, v);
+  });
+  h += `<td class="text-center p-1">
+    <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1"
+            onclick="deleteRow(this)" title="Eliminar fila">
+      <i class="bi bi-dash-circle"></i>
+    </button>
+  </td>`;
+  h += '</tr>';
+  return h;
+}
+
+// ── Add / Delete rows ─────────────────────────────────────────────────────────
+function addRow(key) {
+  const cols  = SHEET_COLS[key];
+  const tbody = document.getElementById('tbody-' + key);
+
+  if (!cols || cols.length === 0) {
+    // No data yet — need column definitions; show placeholder with known schema
+    alert('No hay columnas definidas. Sube un archivo con datos primero.');
+    return;
+  }
+
+  const emptyRow = {};
+  cols.forEach(c => { emptyRow[c] = ''; });
+
+  const idx = tbody.querySelectorAll('tr').length;
+  const tmp = document.createElement('tbody');
+  tmp.innerHTML = rowHtml(key, idx, emptyRow, cols);
+  tbody.appendChild(tmp.firstElementChild);
+
+  updateBadge(key);
+  // Scroll to new row
+  tbody.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function deleteRow(btn) {
+  const tr    = btn.closest('tr');
+  const tbody = tr.parentElement;
+  const key   = tbody.id.replace('tbody-', '');
+  tr.remove();
+  // Renumber
+  tbody.querySelectorAll('tr').forEach((r, i) => {
+    const first = r.querySelector('td:first-child');
+    if (first) first.textContent = i + 1;
+  });
+  updateBadge(key);
+}
+
+function updateBadge(key) {
+  const tbody = document.getElementById('tbody-' + key);
+  const badge = document.getElementById('badge-' + key);
+  if (tbody && badge) badge.textContent = tbody.querySelectorAll('tr').length;
+}
+
+// ── Serialize tables → JSON ───────────────────────────────────────────────────
+function serializeSheet(key) {
+  const tbody = document.getElementById('tbody-' + key);
+  if (!tbody) return [];
+  const rows = [];
+  tbody.querySelectorAll('tr').forEach(tr => {
+    const fields = tr.querySelectorAll('[data-col]');
+    if (!fields.length) return;
+    const obj = {};
+    fields.forEach(el => {
+      const raw = el.value.trim();
+      if (raw === '') {
+        obj[el.dataset.col] = null;
+      } else {
+        const num = Number(raw);
+        obj[el.dataset.col] = (!isNaN(num) && raw !== '') ? num : raw;
+      }
+    });
+    rows.push(obj);
+  });
+  return rows;
+}
+
+function serializeAll() {
+  document.getElementById('reaches_json_input').value = JSON.stringify(serializeSheet('reaches'));
+  document.getElementById('sources_json_input').value = JSON.stringify(serializeSheet('sources'));
+  document.getElementById('wqdata_json_input').value  = JSON.stringify(serializeSheet('wqdata'));
+  return true;
+}
+
+function filterSources(btn) {
+  const tipo = btn.dataset.filter;
+  const tbody = document.getElementById('tbody-sources');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr').forEach(tr => {
+    if (!tipo) {
+      tr.style.display = '';
+    } else {
+      const sel = tr.querySelector('[data-col="TIPO"]');
+      const val = sel ? sel.value.toUpperCase() : '';
+      tr.style.display = (val === tipo) ? '' : 'none';
+    }
+  });
+  document.querySelectorAll('#sources-filter-btns .btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  buildTable('reaches');
+  buildTable('sources');
+  buildTable('wqdata');
+});
+</script>
+{% endblock %}

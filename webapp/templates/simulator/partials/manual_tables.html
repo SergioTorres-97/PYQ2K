@@ -1,0 +1,396 @@
+<input type="hidden" name="reaches_json" id="mt_reaches_json">
+<input type="hidden" name="sources_json" id="mt_sources_json">
+<input type="hidden" name="wqdata_json"  id="mt_wqdata_json">
+
+<ul class="nav nav-tabs mb-0" id="mt-sheetTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#mt-reaches" type="button">
+      <i class="bi bi-diagram-3"></i> REACHES
+      <span class="badge bg-secondary ms-1" id="mt-badge-reaches">0</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#mt-sources" type="button">
+      <i class="bi bi-geo-alt"></i> SOURCES
+      <span class="badge bg-secondary ms-1" id="mt-badge-sources">0</span>
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#mt-wqdata" type="button">
+      <i class="bi bi-water"></i> WQ_DATA
+      <span class="badge bg-secondary ms-1" id="mt-badge-wqdata">0</span>
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content border border-top-0 rounded-bottom mb-4">
+
+  <div class="tab-pane fade show active p-2" id="mt-reaches" role="tabpanel">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="text-muted small">Tramos del río — una fila por tramo.</span>
+      <button type="button" class="btn btn-sm btn-outline-success" onclick="mtAddRow('reaches')">
+        <i class="bi bi-plus-circle"></i> Añadir tramo
+      </button>
+    </div>
+    <div id="mt-table-reaches" class="table-responsive" style="max-height:360px;overflow-y:auto;"></div>
+  </div>
+
+  <div class="tab-pane fade p-2" id="mt-sources" role="tabpanel">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <span class="text-muted small">Vertimientos y captaciones.</span>
+        <div class="btn-group btn-group-sm" id="mt-sources-filter-btns" role="group">
+          <button type="button" class="btn btn-outline-secondary active" data-filter="" onclick="mtFilterSources(this)">Todos</button>
+          <button type="button" class="btn btn-outline-danger" data-filter="VERTIMIENTO" onclick="mtFilterSources(this)">Vertimientos</button>
+          <button type="button" class="btn btn-outline-primary" data-filter="CAPTACION" onclick="mtFilterSources(this)">Captaciones</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-success" onclick="mtAddRow('sources')">
+        <i class="bi bi-plus-circle"></i> Añadir fuente
+      </button>
+    </div>
+    <div id="mt-table-sources" class="table-responsive" style="max-height:360px;overflow-y:auto;"></div>
+  </div>
+
+  <div class="tab-pane fade p-2" id="mt-wqdata" role="tabpanel">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <span class="text-muted small">Datos de calidad observados — primera fila debe ser CABECERA.</span>
+      <button type="button" class="btn btn-sm btn-outline-success" onclick="mtAddRow('wqdata')">
+        <i class="bi bi-plus-circle"></i> Añadir estación
+      </button>
+    </div>
+    <div id="mt-table-wqdata" class="table-responsive" style="max-height:360px;overflow-y:auto;"></div>
+  </div>
+
+</div>
+
+<script>
+// ── Initial data from Django ───────────────────────────────────────────────
+const MT_INIT = {
+  reaches: {{ tables_reaches_json|safe }},
+  sources: {{ tables_sources_json|safe }},
+  wqdata:  {{ tables_wqdata_json|safe }},
+};
+
+// ── Column schemas ─────────────────────────────────────────────────────────
+const MT_SCHEMAS = {
+  reaches: [
+    'NOMBRE_TRAMO','EST_ARRIBA','EST_ABAJO','FUENTE_PRINCIPAL',
+    'X_ARRIBA','Y_ARRIBA','X_ABAJO','Y_ABAJO',
+    'X_QUAL2K_ARRIBA','X_QUAL2K_ABAJO','ELEV_ARRIBA','ELEV_ABAJO',
+    'ALPHA_1','BETA_1','ALPHA_2','BETA_2',
+    'SOMBRA_[-]','TEMPERATURA_[C]','TEMPERATURA_ROCIO_[C]',
+    'VELOCIDAD_DEL_VIENTO_[MS]','COBERTURA_NUBES_[-]',
+  ],
+  sources: [
+    'NOMBRE_VERTIMIENTO','TIPO','X','Y','X_QUAL2K',
+    'CAUDAL','TEMPERATURA','CONDUCTIVIDAD','SST','OXIGENO_DISUELTO',
+    'DBO5','NTK','NITROGENO_AMONIACAL','NITRITOS','NITRATOS',
+    'FOSFORO_TOTAL','ORTOFOSFATOS','COLIFORMES_TOTALES',
+    'COLIFORMES_TERMOTOLERANTES','E_COLI','ALCALINIDAD','pH',
+  ],
+  wqdata: [
+    'NOMBRE_ESTACIONES','X','Y','X_QUAL2K',
+    'CAUDAL','TEMPERATURA','CONDUCTIVIDAD','SST','OXIGENO_DISUELTO',
+    'DBO5','NTK','NITROGENO_AMONIACAL','NITRITOS','NITRATOS',
+    'FOSFORO_TOTAL','ORTOFOSFATOS','COLIFORMES_TOTALES',
+    'COLIFORMES_TERMOTOLERANTES','E_COLI','ALCALINIDAD','pH',
+  ],
+};
+
+// ── Short labels for table headers ────────────────────────────────────────
+const MT_LABELS = {
+  reaches: {
+    'NOMBRE_TRAMO':              'Nombre',
+    'EST_ARRIBA':                'Est.↑ (km)',
+    'EST_ABAJO':                 'Est.↓ (km)',
+    'FUENTE_PRINCIPAL':          'Fuente',
+    'X_ARRIBA':                  'X↑',
+    'Y_ARRIBA':                  'Y↑',
+    'X_ABAJO':                   'X↓',
+    'Y_ABAJO':                   'Y↓',
+    'X_QUAL2K_ARRIBA':           'Q2K↑',
+    'X_QUAL2K_ABAJO':            'Q2K↓',
+    'ELEV_ARRIBA':               'Elev↑ (m)',
+    'ELEV_ABAJO':                'Elev↓ (m)',
+    'ALPHA_1':                   'α₁',
+    'BETA_1':                    'β₁',
+    'ALPHA_2':                   'α₂',
+    'BETA_2':                    'β₂',
+    'SOMBRA_[-]':                'Sombra',
+    'TEMPERATURA_[C]':           'T aire (°C)',
+    'TEMPERATURA_ROCIO_[C]':     'T rocío (°C)',
+    'VELOCIDAD_DEL_VIENTO_[MS]': 'Viento (m/s)',
+    'COBERTURA_NUBES_[-]':       'Nubes',
+  },
+  sources: {
+    'NOMBRE_VERTIMIENTO':          'Nombre',
+    'TIPO':                        'Tipo',
+    'X':                           'X',
+    'Y':                           'Y',
+    'X_QUAL2K':                    'km Q2K',
+    'CAUDAL':                      'Q (m³/s)',
+    'TEMPERATURA':                 'T (°C)',
+    'CONDUCTIVIDAD':               'Cond.',
+    'SST':                         'SST',
+    'OXIGENO_DISUELTO':            'OD',
+    'DBO5':                        'DBO₅',
+    'NTK':                         'NTK',
+    'NITROGENO_AMONIACAL':         'N-NH₄',
+    'NITRITOS':                    'NO₂⁻',
+    'NITRATOS':                    'NO₃⁻',
+    'FOSFORO_TOTAL':               'P total',
+    'ORTOFOSFATOS':                'Ortofosf.',
+    'COLIFORMES_TOTALES':          'Col. Tot.',
+    'COLIFORMES_TERMOTOLERANTES':  'Col. Ter.',
+    'E_COLI':                      'E. coli',
+    'ALCALINIDAD':                 'Alcal.',
+    'pH':                          'pH',
+  },
+  wqdata: {
+    'NOMBRE_ESTACIONES':           'Estación',
+    'X':                           'X',
+    'Y':                           'Y',
+    'X_QUAL2K':                    'km Q2K',
+    'CAUDAL':                      'Q (m³/s)',
+    'TEMPERATURA':                 'T (°C)',
+    'CONDUCTIVIDAD':               'Cond.',
+    'SST':                         'SST',
+    'OXIGENO_DISUELTO':            'OD',
+    'DBO5':                        'DBO₅',
+    'NTK':                         'NTK',
+    'NITROGENO_AMONIACAL':         'N-NH₄',
+    'NITRITOS':                    'NO₂⁻',
+    'NITRATOS':                    'NO₃⁻',
+    'FOSFORO_TOTAL':               'P total',
+    'ORTOFOSFATOS':                'Ortofosf.',
+    'COLIFORMES_TOTALES':          'Col. Tot.',
+    'COLIFORMES_TERMOTOLERANTES':  'Col. Ter.',
+    'E_COLI':                      'E. coli',
+    'ALCALINIDAD':                 'Alcal.',
+    'pH':                          'pH',
+  },
+};
+
+// ── Columns rendered as <select> ──────────────────────────────────────────
+const MT_SELECT = {
+  sources: { TIPO: ['VERTIMIENTO', 'CAPTACION'] },
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function mtEsc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v)
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;')
+    .replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function mtLabel(key, col) {
+  return (MT_LABELS[key] || {})[col] || col;
+}
+
+function mtCellHtml(key, col, v) {
+  const opts = (MT_SELECT[key] || {})[col];
+  if (opts) {
+    const selOpts = opts.map(o =>
+      `<option value="${mtEsc(o)}"${String(v).toUpperCase()===o?' selected':''}>${o}</option>`
+    ).join('');
+    return `<td class="p-1">
+      <select class="form-select form-select-sm px-1" style="min-width:120px" data-col="${mtEsc(col)}">
+        ${selOpts}
+      </select>
+    </td>`;
+  }
+  return `<td class="p-1">
+    <input type="text" class="form-control form-control-sm px-1"
+           style="min-width:80px" data-col="${mtEsc(col)}" value="${mtEsc(String(v ?? ''))}">
+  </td>`;
+}
+
+function mtRowHtml(key, idx, row) {
+  const cols = MT_SCHEMAS[key];
+  let h = '<tr>';
+  h += `<td class="text-center text-muted small align-middle" style="min-width:32px">${idx+1}</td>`;
+  cols.forEach(col => {
+    const v = (row && row[col] !== null && row[col] !== undefined) ? row[col] : '';
+    h += mtCellHtml(key, col, v);
+  });
+  h += `<td class="text-center p-1 align-middle">
+    <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1"
+            onclick="mtDeleteRow(this)" title="Eliminar fila">
+      <i class="bi bi-dash-circle"></i>
+    </button>
+  </td>`;
+  h += '</tr>';
+  return h;
+}
+
+// ── Build table (always shows header from schema) ─────────────────────────
+function mtBuildTable(key) {
+  let data = MT_INIT[key] || [];
+  if (key === 'sources' && data.length > 0) {
+    data = [...data].sort((a, b) => (parseFloat(b['X_QUAL2K']) || 0) - (parseFloat(a['X_QUAL2K']) || 0));
+    MT_INIT[key] = data;
+  }
+  const cols      = MT_SCHEMAS[key];
+  const container = document.getElementById('mt-table-' + key);
+  const badge     = document.getElementById('mt-badge-' + key);
+
+  // Header
+  let html = `<table class="table table-bordered table-sm mb-0 align-middle" id="mt-tbl-${key}">`;
+  html += '<thead class="table-light"><tr>';
+  html += '<th style="width:32px" class="text-center fw-normal text-muted small">#</th>';
+  cols.forEach(col => {
+    html += `<th class="small text-nowrap px-2" title="${mtEsc(col)}">${mtEsc(mtLabel(key, col))}</th>`;
+  });
+  html += '<th style="width:36px"></th>';
+  html += '</tr></thead>';
+
+  // Body
+  html += `<tbody id="mt-tbody-${key}">`;
+  if (data.length > 0) {
+    data.forEach((row, i) => { html += mtRowHtml(key, i, row); });
+  }
+  html += '</tbody></table>';
+
+  container.innerHTML = html;
+  badge.textContent = data.length;
+
+  if (key === 'reaches') mtLockReachesCabecera();
+  if (key === 'wqdata')  mtEnsureWqdataCabecera();
+}
+
+// ── Add / Delete ──────────────────────────────────────────────────────────
+function mtAddRow(key) {
+  const tbody = document.getElementById('mt-tbody-' + key);
+  const idx   = tbody.querySelectorAll('tr').length;
+  const tmp   = document.createElement('tbody');
+  tmp.innerHTML = mtRowHtml(key, idx, {});
+  tbody.appendChild(tmp.firstElementChild);
+  mtUpdateBadge(key);
+  tbody.lastElementChild.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  if (key === 'reaches' && idx === 0) mtLockReachesCabecera();
+}
+
+function mtDeleteRow(btn) {
+  const tr    = btn.closest('tr');
+  const tbody = tr.parentElement;
+  const key   = tbody.id.replace('mt-tbody-','');
+  tr.remove();
+  tbody.querySelectorAll('tr').forEach((r, i) => {
+    const first = r.querySelector('td:first-child');
+    if (first) first.textContent = i + 1;
+  });
+  mtUpdateBadge(key);
+}
+
+function mtUpdateBadge(key) {
+  const tbody = document.getElementById('mt-tbody-' + key);
+  const badge = document.getElementById('mt-badge-' + key);
+  if (tbody && badge) badge.textContent = tbody.querySelectorAll('tr').length;
+}
+
+// ── CABECERA enforcement ───────────────────────────────────────────────────
+function mtLockReachesCabecera() {
+  const tbody = document.getElementById('mt-tbody-reaches');
+  if (!tbody) return;
+  const firstRow = tbody.querySelector('tr');
+  if (!firstRow) return;
+  const inp = firstRow.querySelector('[data-col="EST_ARRIBA"]');
+  if (!inp) return;
+  inp.value = 'CABECERA';
+  inp.readOnly = true;
+  inp.classList.add('bg-light', 'text-muted');
+  inp.title = 'La estación aguas arriba del primer tramo siempre es CABECERA';
+}
+
+function mtLockWqdataCabeceraRow(tr) {
+  const nameInp = tr.querySelector('[data-col="NOMBRE_ESTACIONES"]');
+  if (nameInp) {
+    nameInp.value = 'CABECERA';
+    nameInp.readOnly = true;
+    nameInp.classList.add('bg-light', 'fw-semibold');
+    nameInp.title = 'La estación CABECERA es obligatoria para el modelo';
+  }
+  const delBtn = tr.querySelector('button[onclick="mtDeleteRow(this)"]');
+  if (delBtn) delBtn.classList.add('d-none');
+}
+
+function mtEnsureWqdataCabecera() {
+  const tbody = document.getElementById('mt-tbody-wqdata');
+  if (!tbody) return;
+  const firstRow = tbody.querySelector('tr');
+  if (firstRow) {
+    const nameInp = firstRow.querySelector('[data-col="NOMBRE_ESTACIONES"]');
+    if (nameInp && nameInp.value.trim().toUpperCase() === 'CABECERA') {
+      mtLockWqdataCabeceraRow(firstRow);
+      return;
+    }
+  }
+  // Prepend CABECERA row
+  const tmp = document.createElement('tbody');
+  tmp.innerHTML = mtRowHtml('wqdata', 0, { NOMBRE_ESTACIONES: 'CABECERA' });
+  tbody.insertBefore(tmp.firstElementChild, tbody.firstChild);
+  // Renumber
+  tbody.querySelectorAll('tr').forEach((r, i) => {
+    const first = r.querySelector('td:first-child');
+    if (first) first.textContent = i + 1;
+  });
+  mtLockWqdataCabeceraRow(tbody.querySelector('tr'));
+  mtUpdateBadge('wqdata');
+}
+
+// ── Serialize ─────────────────────────────────────────────────────────────
+function mtSerializeSheet(key) {
+  const tbody = document.getElementById('mt-tbody-' + key);
+  if (!tbody) return [];
+  const rows = [];
+  tbody.querySelectorAll('tr').forEach(tr => {
+    const fields = tr.querySelectorAll('[data-col]');
+    if (!fields.length) return;
+    const obj = {};
+    fields.forEach(el => {
+      const raw = el.value.trim();
+      if (raw === '') {
+        obj[el.dataset.col] = null;
+      } else {
+        const num = Number(raw);
+        obj[el.dataset.col] = (!isNaN(num) && raw !== '') ? num : raw;
+      }
+    });
+    rows.push(obj);
+  });
+  return rows;
+}
+
+function mtSerializeAll() {
+  document.getElementById('mt_reaches_json').value = JSON.stringify(mtSerializeSheet('reaches'));
+  document.getElementById('mt_sources_json').value = JSON.stringify(mtSerializeSheet('sources'));
+  document.getElementById('mt_wqdata_json').value  = JSON.stringify(mtSerializeSheet('wqdata'));
+  return true;
+}
+
+function mtFilterSources(btn) {
+  const tipo = btn.dataset.filter;
+  const tbody = document.getElementById('mt-tbody-sources');
+  if (!tbody) return;
+  tbody.querySelectorAll('tr').forEach(tr => {
+    if (!tipo) {
+      tr.style.display = '';
+    } else {
+      const sel = tr.querySelector('[data-col="TIPO"]');
+      const val = sel ? sel.value.toUpperCase() : '';
+      tr.style.display = (val === tipo) ? '' : 'none';
+    }
+  });
+  document.querySelectorAll('#mt-sources-filter-btns .btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  mtBuildTable('reaches');
+  mtBuildTable('sources');
+  mtBuildTable('wqdata');
+});
+</script>

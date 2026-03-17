@@ -1,0 +1,448 @@
+{% extends "base.html" %}
+{% load simulator_extras %}
+{% block title %}Configurar ejecución{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'simulator:project_detail' project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ project.name }}
+  </a>
+  <div class="d-flex align-items-center justify-content-between mt-1">
+    <h3 class="mb-0">Paso 2: Configuración del modelo</h3>
+    <a href="{% url 'simulator:run_edit_input' run.pk %}" class="btn btn-sm btn-outline-warning">
+      <i class="bi bi-table"></i> Editar datos de entrada (Paso 1)
+    </a>
+  </div>
+</div>
+
+<form method="post">
+  {% csrf_token %}
+
+  <!-- Header params -->
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Parámetros generales</div>
+    <div class="card-body">
+      <div class="row g-3">
+        {% for field in form2 %}
+        {% if field.html_name != 'generar_comparacion' %}
+        <div class="col-md-4">
+          <label class="form-label fw-semibold small">{{ field.label }}</label>
+          {{ field }}
+          {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+          {% if field.errors %}<div class="text-danger small">{{ field.errors }}</div>{% endif %}
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Opciones de gráficas -->
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">Opciones de gráficas</div>
+    <div class="card-body">
+      <div class="form-check form-switch">
+        {{ form2.generar_comparacion }}
+        <label class="form-check-label fw-semibold small" for="{{ form2.generar_comparacion.id_for_label }}">
+          {{ form2.generar_comparacion.label }}
+        </label>
+        <div class="form-text">{{ form2.generar_comparacion.help_text }}</div>
+        {% if form2.generar_comparacion.errors %}
+          <div class="text-danger small">{{ form2.generar_comparacion.errors }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Reach rates -->
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">
+      Tasas por tramo
+      <span class="text-muted fw-normal small ms-2">— opcional, dejar en blanco usa valores por defecto</span>
+    </div>
+    <div class="card-body p-0" id="reach-rates-body">
+      <div class="table-responsive">
+        <table class="table table-bordered table-sm mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Tramo</th>
+              {% for p in rate_params %}
+              <th class="small">{{ rate_labels|dict_get:p }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for i in reach_range %}
+            <tr>
+              <td class="fw-semibold small">Tramo {{ forloop.counter }}</td>
+              {% for p in rate_params %}
+              <td>
+                <input type="number" step="0.000001" name="{{ p }}_{{ i }}"
+                  class="form-control form-control-sm"
+                  placeholder="default"
+                  value="{% with vals=existing_rates|dict_get:p %}{% if vals %}{% with v=vals|index:i %}{% if v is not None %}{{ v }}{% endif %}{% endwith %}{% endif %}{% endwith %}">
+              </td>
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <!-- JSON import/export bar -->
+      <div class="px-3 py-2 border-top bg-light d-flex align-items-start gap-2 flex-wrap">
+        <div class="flex-grow-1">
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="small fw-semibold text-muted">
+              <i class="bi bi-code-slash"></i> Copiar / Pegar JSON
+            </span>
+            <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2 small"
+                    onclick="reachLoadJson()" title="Leer campos → textarea">
+              <i class="bi bi-arrow-up-circle"></i> Desde campos
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-primary py-0 px-2 small"
+                    onclick="reachApplyJson()" title="Textarea → rellenar campos">
+              <i class="bi bi-arrow-down-circle"></i> Aplicar
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-success py-0 px-2 small"
+                    onclick="reachCopyJson()" title="Copiar al portapapeles">
+              <i class="bi bi-clipboard"></i> Copiar
+            </button>
+            <button type="button" class="btn btn-xs btn-outline-danger py-0 px-2 small"
+                    onclick="clearReachRates()" title="Vaciar todos los campos">
+              <i class="bi bi-x-circle"></i> Limpiar
+            </button>
+          </div>
+          <textarea id="reach-json-ta" rows="3"
+                    class="form-control form-control-sm font-monospace"
+                    placeholder='{"kaaa": [null, 0.5, null], "kdc": [0.1, 0.2, 0.3]}'
+                    spellcheck="false"></textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Tasas cinéticas globales (rates_dict) ─────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center"
+         role="button" data-bs-toggle="collapse" data-bs-target="#rates-global-body"
+         aria-expanded="{% if config_rates %}true{% else %}false{% endif %}">
+      <span class="fw-semibold">
+        <i class="bi bi-sliders2"></i> Tasas cinéticas globales
+        <span class="fw-normal text-muted small ms-1">— aplica a todo el modelo (rates_dict)</span>
+      </span>
+      <span>
+        {% if config_rates %}
+          <span class="badge bg-warning-subtle text-warning border border-warning-subtle me-1">Personalizadas</span>
+        {% else %}
+          <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle me-1">Por defecto</span>
+        {% endif %}
+        <i class="bi bi-chevron-down"></i>
+      </span>
+    </div>
+    <div class="collapse{% if config_rates %} show{% endif %}" id="rates-global-body">
+      <div class="card-body p-0">
+        <div class="px-3 pt-2 pb-1">
+          <p class="text-muted small mb-2">
+            <i class="bi bi-info-circle"></i>
+            Deja en blanco para usar el valor por defecto de QUAL2K.
+            El valor por defecto aparece como <em>placeholder</em>.
+            Equivale a <code>model.config.actualizar_rates(**valores)</code>.
+          </p>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width:50%">Parámetro</th>
+                <th style="width:20%" class="text-center text-muted small">Valor por defecto</th>
+                <th style="width:30%">Valor personalizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for group in rates_groups %}
+              <tr class="table-secondary">
+                <td colspan="3" class="fw-semibold small py-1 px-3">{{ group.label }}</td>
+              </tr>
+              {% for param in group.params %}
+              <tr>
+                <td class="small align-middle ps-4">{{ param.label }}</td>
+                <td class="text-center text-muted small align-middle">{{ param.default }}</td>
+                <td class="p-1 align-middle">
+                  <input type="number" step="any" name="rate_glob_{{ param.key }}"
+                         class="form-control form-control-sm"
+                         placeholder="{{ param.default }}"
+                         value="{{ config_rates|dict_get:param.key }}">
+                </td>
+              </tr>
+              {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <!-- JSON import/export bar -->
+        <div class="px-3 py-2 border-top bg-light d-flex align-items-start gap-2 flex-wrap">
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="small fw-semibold text-muted">
+                <i class="bi bi-code-slash"></i> Copiar / Pegar JSON
+              </span>
+              <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2 small"
+                      onclick="ratesLoadJson()" title="Leer campos → textarea">
+                <i class="bi bi-arrow-up-circle"></i> Desde campos
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-primary py-0 px-2 small"
+                      onclick="ratesApplyJson()" title="Textarea → rellenar campos">
+                <i class="bi bi-arrow-down-circle"></i> Aplicar
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-success py-0 px-2 small"
+                      onclick="ratesCopyJson()" title="Copiar al portapapeles">
+                <i class="bi bi-clipboard"></i> Copiar
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-danger py-0 px-2 small"
+                      onclick="clearRatesGlobal()" title="Vaciar todos los campos">
+                <i class="bi bi-x-circle"></i> Limpiar
+              </button>
+            </div>
+            <textarea id="rates-json-ta" rows="3"
+                      class="form-control form-control-sm font-monospace"
+                      placeholder='{"kdc": 0.09, "kn": 0.08, "NINpmin": 0.05}'
+                      spellcheck="false"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Parámetros de luz y extinción (light_dict) ────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center"
+         role="button" data-bs-toggle="collapse" data-bs-target="#light-global-body"
+         aria-expanded="{% if config_light %}true{% else %}false{% endif %}">
+      <span class="fw-semibold">
+        <i class="bi bi-brightness-high"></i> Parámetros de luz y extinción
+        <span class="fw-normal text-muted small ms-1">— (light_dict)</span>
+      </span>
+      <span>
+        {% if config_light %}
+          <span class="badge bg-warning-subtle text-warning border border-warning-subtle me-1">Personalizadas</span>
+        {% else %}
+          <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle me-1">Por defecto</span>
+        {% endif %}
+        <i class="bi bi-chevron-down"></i>
+      </span>
+    </div>
+    <div class="collapse{% if config_light %} show{% endif %}" id="light-global-body">
+      <div class="card-body p-0">
+        <div class="px-3 pt-2 pb-1">
+          <p class="text-muted small mb-2">
+            <i class="bi bi-info-circle"></i>
+            Equivale a <code>model.config.actualizar_light(**valores)</code>.
+          </p>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered mb-0">
+            <thead class="table-light">
+              <tr>
+                <th style="width:50%">Parámetro</th>
+                <th style="width:20%" class="text-center text-muted small">Valor por defecto</th>
+                <th style="width:30%">Valor personalizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for param in light_params %}
+              <tr>
+                <td class="small align-middle ps-3">{{ param.label }}</td>
+                <td class="text-center text-muted small align-middle">{{ param.default }}</td>
+                <td class="p-1 align-middle">
+                  <input type="number" step="any" name="light_glob_{{ param.key }}"
+                         class="form-control form-control-sm"
+                         placeholder="{{ param.default }}"
+                         value="{{ config_light|dict_get:param.key }}">
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <!-- JSON import/export bar -->
+        <div class="px-3 py-2 border-top bg-light d-flex align-items-start gap-2 flex-wrap">
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <span class="small fw-semibold text-muted">
+                <i class="bi bi-code-slash"></i> Copiar / Pegar JSON
+              </span>
+              <button type="button" class="btn btn-xs btn-outline-secondary py-0 px-2 small"
+                      onclick="lightLoadJson()" title="Leer campos → textarea">
+                <i class="bi bi-arrow-up-circle"></i> Desde campos
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-primary py-0 px-2 small"
+                      onclick="lightApplyJson()" title="Textarea → rellenar campos">
+                <i class="bi bi-arrow-down-circle"></i> Aplicar
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-success py-0 px-2 small"
+                      onclick="lightCopyJson()" title="Copiar al portapapeles">
+                <i class="bi bi-clipboard"></i> Copiar
+              </button>
+              <button type="button" class="btn btn-xs btn-outline-danger py-0 px-2 small"
+                      onclick="clearLightGlobal()" title="Vaciar todos los campos">
+                <i class="bi bi-x-circle"></i> Limpiar
+              </button>
+            </div>
+            <textarea id="light-json-ta" rows="3"
+                      class="form-control form-control-sm font-monospace"
+                      placeholder='{"kep": 0.2, "kess": 0.052}'
+                      spellcheck="false"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-success">
+      <i class="bi bi-save"></i> Guardar configuración
+    </button>
+    <a href="{% url 'simulator:project_detail' project.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+
+{% block extra_js %}
+<script>
+// ── Helpers ────────────────────────────────────────────────────────────────
+function _readInputs(scope) {
+  const result = {};
+  document.querySelectorAll(`${scope} input[type="number"]`).forEach(inp => {
+    if (inp.value.trim() !== '') {
+      const key = inp.name.replace(/^rate_glob_|^light_glob_/, '');
+      const n = parseFloat(inp.value);
+      if (!isNaN(n)) result[key] = n;
+    }
+  });
+  return result;
+}
+
+function _applyJson(scope, prefix, taId) {
+  const ta = document.getElementById(taId);
+  let data;
+  try { data = JSON.parse(ta.value); }
+  catch (e) { alert('JSON inválido: ' + e.message); return; }
+  Object.entries(data).forEach(([key, val]) => {
+    const inp = document.querySelector(`${scope} input[name="${prefix}${key}"]`);
+    if (inp && val !== null && val !== undefined && !isNaN(parseFloat(val))) {
+      inp.value = parseFloat(val);
+    }
+  });
+}
+
+function _loadToTa(scope, taId) {
+  const ta = document.getElementById(taId);
+  ta.value = JSON.stringify(_readInputs(scope), null, 2);
+}
+
+function _copyTa(taId, loadFn) {
+  loadFn();
+  const ta = document.getElementById(taId);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(() => {
+      const old = ta.style.background;
+      ta.style.background = '#d4edda';
+      setTimeout(() => { ta.style.background = old; }, 600);
+    });
+  } else {
+    ta.select();
+    document.execCommand('copy');
+  }
+}
+
+// ── reach rates (per-reach) ─────────────────────────────────────────────────
+const REACH_PARAMS = [{% for p in rate_params %}"{{ p }}"{% if not forloop.last %},{% endif %}{% endfor %}];
+
+function _readReachInputs() {
+  const result = {};
+  REACH_PARAMS.forEach(param => {
+    const inputs = document.querySelectorAll(`#reach-rates-body input[name^="${param}_"]`);
+    if (!inputs.length) return;
+    const vals = Array.from(inputs).map(inp => {
+      const v = inp.value.trim();
+      return v !== '' && !isNaN(parseFloat(v)) ? parseFloat(v) : null;
+    });
+    if (vals.some(v => v !== null)) result[param] = vals;
+  });
+  return result;
+}
+
+function reachLoadJson() {
+  const ta = document.getElementById('reach-json-ta');
+  ta.value = JSON.stringify(_readReachInputs(), null, 2);
+}
+
+function reachApplyJson() {
+  const ta = document.getElementById('reach-json-ta');
+  let data;
+  try { data = JSON.parse(ta.value); }
+  catch (e) { alert('JSON inválido: ' + e.message); return; }
+  Object.entries(data).forEach(([param, vals]) => {
+    if (!Array.isArray(vals)) return;
+    vals.forEach((v, i) => {
+      const inp = document.querySelector(`#reach-rates-body input[name="${param}_${i}"]`);
+      if (!inp) return;
+      inp.value = (v !== null && v !== undefined && !isNaN(parseFloat(v))) ? parseFloat(v) : '';
+    });
+  });
+}
+
+function reachCopyJson() {
+  reachLoadJson();
+  const ta = document.getElementById('reach-json-ta');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(() => {
+      const old = ta.style.background;
+      ta.style.background = '#d4edda';
+      setTimeout(() => { ta.style.background = old; }, 600);
+    });
+  } else {
+    ta.select();
+    document.execCommand('copy');
+  }
+}
+
+function clearReachRates() {
+  document.querySelectorAll('#reach-rates-body input[type="number"]').forEach(i => i.value = '');
+  document.getElementById('reach-json-ta').value = '';
+}
+
+// ── rates_dict ──────────────────────────────────────────────────────────────
+function ratesLoadJson()  { _loadToTa('#rates-global-body', 'rates-json-ta'); }
+function ratesApplyJson() { _applyJson('#rates-global-body', 'rate_glob_', 'rates-json-ta'); }
+function ratesCopyJson()  { _copyTa('rates-json-ta', ratesLoadJson); }
+function clearRatesGlobal() {
+  document.querySelectorAll('#rates-global-body input[type="number"]').forEach(i => i.value = '');
+  document.getElementById('rates-json-ta').value = '';
+}
+
+// ── light_dict ──────────────────────────────────────────────────────────────
+function lightLoadJson()  { _loadToTa('#light-global-body', 'light-json-ta'); }
+function lightApplyJson() { _applyJson('#light-global-body', 'light_glob_', 'light-json-ta'); }
+function lightCopyJson()  { _copyTa('light-json-ta', lightLoadJson); }
+function clearLightGlobal() {
+  document.querySelectorAll('#light-global-body input[type="number"]').forEach(i => i.value = '');
+  document.getElementById('light-json-ta').value = '';
+}
+
+// ── Init: pre-populate textareas if values already exist ───────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const reachVals = _readReachInputs();
+  if (Object.keys(reachVals).length > 0)
+    document.getElementById('reach-json-ta').value = JSON.stringify(reachVals, null, 2);
+
+  const rateVals = _readInputs('#rates-global-body');
+  if (Object.keys(rateVals).length > 0)
+    document.getElementById('rates-json-ta').value = JSON.stringify(rateVals, null, 2);
+
+  const lightVals = _readInputs('#light-global-body');
+  if (Object.keys(lightVals).length > 0)
+    document.getElementById('light-json-ta').value = JSON.stringify(lightVals, null, 2);
+});
+</script>
+{% endblock %}
+{% endblock %}

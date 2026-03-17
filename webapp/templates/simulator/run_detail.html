@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{{ run.name }}{% endblock %}
+
+{% block extra_head %}
+{% if run.status == 'running' or run.status == 'pending' %}
+<script>window.STATUS_URL = "{% url 'simulator:run_status_api' run.pk %}";</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% load simulator_extras %}
+<div class="mb-3">
+  <a href="{% url 'simulator:project_detail' run.project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ run.project.name }}
+  </a>
+  <h3 class="mt-1 d-flex align-items-center gap-2">
+    {{ run.name }}
+    {% include "simulator/partials/status_badge.html" with status=run.status %}
+  </h3>
+</div>
+
+<!-- Action buttons -->
+<div class="mb-4 d-flex gap-2 flex-wrap">
+  {% if run.status != 'running' %}
+  <button id="btn-launch" class="btn btn-primary"
+    hx-post="{% url 'simulator:run_launch' run.pk %}" onclick="launchRun()">
+    <i class="bi bi-play-fill"></i>
+    {% if run.status == 'done' %}Re-ejecutar{% else %}Ejecutar modelo{% endif %}
+  </button>
+  {% endif %}
+  {% if run.status == 'done' %}
+  <a href="{% url 'simulator:download_csv' run.pk %}" class="btn btn-outline-success">
+    <i class="bi bi-filetype-csv"></i> Descargar CSV
+  </a>
+  <a href="{% url 'simulator:download_zip' run.pk %}" class="btn btn-outline-secondary">
+    <i class="bi bi-file-zip"></i> Descargar ZIP
+  </a>
+  {% endif %}
+  <a href="{% url 'simulator:run_edit_input' run.pk %}" class="btn btn-outline-warning">
+    <i class="bi bi-table"></i> Editar datos de entrada
+  </a>
+  <a href="{% url 'simulator:run_configure' run.pk %}" class="btn btn-outline-secondary">
+    <i class="bi bi-gear"></i> Editar configuración
+  </a>
+</div>
+
+<!-- Cinéticas configuradas -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center"
+       role="button" data-bs-toggle="collapse" data-bs-target="#kinetics-body"
+       aria-expanded="false">
+    <span class="fw-semibold"><i class="bi bi-sliders"></i> Tasas cinéticas por tramo</span>
+    <span class="text-muted small">
+      {% if existing_rates %}
+        <span class="badge bg-success-subtle text-success border border-success-subtle">Personalizadas</span>
+      {% else %}
+        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Valores por defecto</span>
+      {% endif %}
+      <i class="bi bi-chevron-down ms-1"></i>
+    </span>
+  </div>
+  <div class="collapse" id="kinetics-body">
+    <div class="card-body p-0">
+      {% if existing_rates %}
+      <div class="table-responsive">
+        <table class="table table-bordered table-sm mb-0">
+          <thead class="table-light">
+            <tr>
+              <th class="small">Tramo</th>
+              {% for p in rate_params %}
+              <th class="small text-nowrap">{{ rate_labels|dict_get:p }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for i in reach_range %}
+            <tr>
+              <td class="fw-semibold small text-nowrap">Tramo {{ forloop.counter }}</td>
+              {% for p in rate_params %}
+              {% with vals=existing_rates|dict_get:p %}
+              <td class="small text-center">
+                {% if vals %}{% with v=vals|index:i %}{% if v is not None %}<span class="text-primary fw-semibold">{{ v }}</span>{% else %}<span class="text-muted">—</span>{% endif %}{% endwith %}{% else %}<span class="text-muted">—</span>{% endif %}
+              </td>
+              {% endwith %}
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="px-3 py-2 text-muted small">
+        <i class="bi bi-info-circle"></i> No se configuraron tasas personalizadas — el modelo usó los valores por defecto de QUAL2K.
+        <a href="{% url 'simulator:run_configure' run.pk %}" class="ms-2">Configurar cinéticas</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Global rates/light overrides review -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center"
+       role="button" data-bs-toggle="collapse" data-bs-target="#global-rates-detail-body"
+       aria-expanded="false">
+    <span class="fw-semibold"><i class="bi bi-gear"></i> Tasas cinéticas globales &amp; luz</span>
+    <span>
+      {% if config_rates or config_light %}
+        <span class="badge bg-warning-subtle text-warning border border-warning-subtle me-1">Personalizadas</span>
+      {% else %}
+        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle me-1">Por defecto</span>
+      {% endif %}
+      <i class="bi bi-chevron-down ms-1"></i>
+    </span>
+  </div>
+  <div class="collapse" id="global-rates-detail-body">
+    <div class="card-body p-0">
+      {% if config_rates or config_light %}
+
+        {% if config_rates %}
+        <div class="px-3 pt-2 pb-1">
+          <span class="small fw-semibold text-muted">rates_dict — valores sobreescritos</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Parámetro</th>
+                <th class="text-center">Valor personalizado</th>
+                <th class="text-center text-muted small">Default</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for group in rates_groups %}
+                {% for param in group.params %}
+                  {% with v=config_rates|dict_get:param.key %}
+                  {% if v is not None %}
+                  <tr>
+                    <td class="small">{{ param.label }}</td>
+                    <td class="text-center fw-semibold text-primary small">{{ v }}</td>
+                    <td class="text-center text-muted small">{{ param.default }}</td>
+                  </tr>
+                  {% endif %}
+                  {% endwith %}
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        {% if config_light %}
+        <div class="px-3 pt-2 pb-1 {% if config_rates %}border-top{% endif %}">
+          <span class="small fw-semibold text-muted">light_dict — valores sobreescritos</span>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-bordered mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Parámetro</th>
+                <th class="text-center">Valor personalizado</th>
+                <th class="text-center text-muted small">Default</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for param in light_params %}
+                {% with v=config_light|dict_get:param.key %}
+                {% if v is not None %}
+                <tr>
+                  <td class="small">{{ param.label }}</td>
+                  <td class="text-center fw-semibold text-primary small">{{ v }}</td>
+                  <td class="text-center text-muted small">{{ param.default }}</td>
+                </tr>
+                {% endif %}
+                {% endwith %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+      {% else %}
+      <div class="px-3 py-2 text-muted small">
+        <i class="bi bi-info-circle"></i> Se usaron los valores por defecto de QUAL2K (rates_dict y light_dict sin modificar).
+        <a href="{% url 'simulator:run_configure' run.pk %}" class="ms-2">Configurar parámetros globales</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Running spinner -->
+{% if run.status == 'running' or run.status == 'pending' %}
+<div id="spinner-area" class="text-center py-5">
+  <div class="spinner-border text-primary" style="width:3rem;height:3rem" role="status"></div>
+  <p class="mt-3 text-muted">Simulación QUAL2K en progreso... <br>
+    <small>La página se actualizará automáticamente al finalizar.</small>
+  </p>
+</div>
+{% endif %}
+
+<!-- Error -->
+{% if run.status == 'error' %}
+<div class="alert alert-danger">
+  <strong><i class="bi bi-exclamation-triangle"></i> Error en la simulación</strong>
+  <pre class="error-box mt-2 mb-0">{{ run.error_message }}</pre>
+</div>
+{% endif %}
+
+<!-- Results -->
+{% if run.status == 'done' %}
+
+<!-- KGE Summary -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-semibold"><i class="bi bi-bar-chart-line"></i> Métricas de calibración (KGE)</span>
+    <span class="badge {% if run.kge_global >= 0.77 %}bg-success{% elif run.kge_global >= 0.53 %}kge-good-badge{% elif run.kge_global >= 0.3 %}bg-warning text-dark{% else %}bg-danger{% endif %} fs-6">
+      KGE Global: {{ run.kge_global|floatformat:4 }}
+      — {% if run.kge_global >= 0.77 %}Excelente{% elif run.kge_global >= 0.53 %}Bueno{% elif run.kge_global >= 0.3 %}Aceptable{% else %}No aceptable{% endif %}
+    </span>
+  </div>
+  <div class="card-body p-0">
+    {% include "simulator/partials/kge_table.html" with kge_data=kge_data %}
+  </div>
+</div>
+
+<!-- Longitudinal profiles -->
+{% if graphs.profiles %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-graph-up"></i> Perfiles longitudinales</div>
+  <div class="card-body">
+    {% include "simulator/partials/graph_gallery.html" with images=graphs.profiles %}
+  </div>
+</div>
+{% endif %}
+
+<!-- Cal vs Obs -->
+{% if graphs.comparacion %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-scatter-chart"></i> Simulado vs Observado</div>
+  <div class="card-body">
+    {% include "simulator/partials/graph_gallery.html" with images=graphs.comparacion %}
+  </div>
+</div>
+{% endif %}
+
+{% endif %} {# status == done #}
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/poll_status.js' %}"></script>
+<script>
+function launchRun() {
+  const btn = document.getElementById('btn-launch');
+  if (btn) btn.disabled = true;
+
+  fetch("{% url 'simulator:run_launch' run.pk %}", {
+    method: 'POST',
+    headers: {'X-CSRFToken': '{{ csrf_token }}'},
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.status === 'launched') {
+      window.location.reload();
+    } else {
+      alert(data.error || 'Error al lanzar');
+      if (btn) btn.disabled = false;
+    }
+  });
+}
+</script>
+{% endblock %}

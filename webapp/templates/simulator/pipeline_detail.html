@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Pipeline: {{ pipeline.name }}{% endblock %}
+
+{% block extra_head %}
+{% if pipeline.status == 'running' or pipeline.status == 'pending' %}
+<script>window.STATUS_URL = "{% url 'simulator:pipeline_status_api' pipeline.pk %}";</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'simulator:project_detail' pipeline.project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ pipeline.project.name }}
+  </a>
+  <h3 class="mt-1 d-flex align-items-center gap-2">
+    <i class="bi bi-diagram-3"></i> {{ pipeline.name }}
+    {% include "simulator/partials/status_badge.html" with status=pipeline.status %}
+  </h3>
+</div>
+
+<!-- Actions -->
+<div class="mb-4 d-flex gap-2">
+  {% if pipeline.status != 'running' %}
+  <button class="btn btn-primary" onclick="launchPipeline()">
+    <i class="bi bi-play-fill"></i>
+    {% if pipeline.status == 'done' %}Re-ejecutar pipeline{% else %}Ejecutar pipeline{% endif %}
+  </button>
+  {% endif %}
+</div>
+
+<!-- Error -->
+{% if pipeline.status == 'error' %}
+<div class="alert alert-danger">
+  <strong><i class="bi bi-exclamation-triangle"></i> Error en el pipeline</strong>
+  <pre class="error-box mt-2 mb-0">{{ pipeline.error_message }}</pre>
+</div>
+{% endif %}
+
+<!-- Spinner -->
+{% if pipeline.status == 'running' or pipeline.status == 'pending' %}
+<div id="spinner-area" class="text-center py-4">
+  <div class="spinner-border text-primary" role="status"></div>
+  <p class="mt-2 text-muted">Pipeline ejecutando...</p>
+</div>
+{% endif %}
+
+<!-- Steps timeline -->
+<div class="card">
+  <div class="card-header fw-semibold">Pasos del pipeline</div>
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Paso</th><th>Modelo</th><th>Vertimiento actualizado</th><th>Estado</th><th>KGE Global</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for step in steps %}
+      <tr>
+        <td class="fw-bold">{{ forloop.counter }}</td>
+        <td>{{ step.run.name }}</td>
+        <td>
+          {% if step.nombre_vertimiento %}
+            <code>{{ step.nombre_vertimiento }}</code>
+          {% else %}
+            <span class="text-muted small">— (primer paso)</span>
+          {% endif %}
+        </td>
+        <td>{% include "simulator/partials/status_badge.html" with status=step.run.status %}</td>
+        <td>
+          {% if step.run.kge_global is not None %}
+            <span class="fw-bold {% if step.run.kge_global >= 0.77 %}text-success{% elif step.run.kge_global >= 0.53 %}kge-good-text{% elif step.run.kge_global >= 0.3 %}text-warning{% else %}text-danger{% endif %}">
+              {{ step.run.kge_global|floatformat:4 }}
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <a href="{% url 'simulator:run_detail' step.run.pk %}" class="btn btn-sm btn-outline-primary">
+            Ver resultados
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/poll_status.js' %}"></script>
+<script>
+function launchPipeline() {
+  fetch("{% url 'simulator:pipeline_launch' pipeline.pk %}", {
+    method: 'POST',
+    headers: {'X-CSRFToken': '{{ csrf_token }}'},
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.status === 'launched') window.location.reload();
+    else alert(data.error || 'Error al lanzar');
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% if images %}
+<div class="row g-3">
+  {% for url in images %}
+  <div class="col-md-6 col-lg-4">
+    <a href="{{ url }}" target="_blank">
+      <img src="{{ url }}" class="graph-img w-100" alt="Gráfica">
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-muted small">No hay gráficas disponibles.</p>
+{% endif %}

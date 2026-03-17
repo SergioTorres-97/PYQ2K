@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Escenarios — {{ project.name }}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="{% url 'simulator:project_detail' project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ project.name }}
+  </a>
+  <h2 class="mb-0 mt-1">
+    <i class="bi bi-bar-chart-line"></i> Comparación de Escenarios
+  </h2>
+  <p class="text-muted small mb-0">Selecciona ejecuciones y/o pasos de pipeline completados, y la variable a comparar.</p>
+</div>
+
+{% if error %}
+<div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> {{ error }}</div>
+{% endif %}
+
+<form method="post">
+  {% csrf_token %}
+
+  <div class="row g-3 mb-3">
+
+    <!-- Individual runs -->
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-play-circle"></i> Ejecuciones individuales
+        </div>
+        <div class="card-body py-2" style="max-height: 320px; overflow-y: auto;">
+          {% if not done_runs %}
+            <p class="text-muted small mb-0">No hay ejecuciones completadas.</p>
+          {% else %}
+            {% for run in done_runs %}
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="run_ids"
+                     value="{{ run.pk }}" id="run_{{ run.pk }}"
+                     {% if run.pk in selected_run_pks %}checked{% endif %}>
+              <label class="form-check-label d-flex align-items-center gap-2 flex-wrap" for="run_{{ run.pk }}">
+                <strong>{{ run.name }}</strong>
+                {% if run.kge_global is not None %}
+                  <span class="badge {% if run.kge_global >= 0.77 %}bg-success{% elif run.kge_global >= 0.53 %}kge-good-badge{% elif run.kge_global >= 0.3 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+                    KGE {{ run.kge_global|floatformat:3 }}
+                  </span>
+                {% endif %}
+                <span class="text-muted small">{{ run.created_at|date:"d/m/Y" }}</span>
+              </label>
+            </div>
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Pipelines -->
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-diagram-3"></i> Pipelines
+        </div>
+        <div class="card-body py-2" style="max-height: 320px; overflow-y: auto;">
+          {% if not pipeline_steps_ctx %}
+            <p class="text-muted small mb-0">No hay pipelines completados con pasos disponibles.</p>
+          {% else %}
+            {% for entry in pipeline_steps_ctx %}
+            {% with pl=entry.pipeline steps=entry.steps %}
+            <div class="mb-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="pipeline_ids"
+                       value="{{ pl.pk }}" id="pl_{{ pl.pk }}"
+                       {% if pl.pk in selected_pipeline_steps %}checked{% endif %}
+                       onchange="toggleStepSel({{ pl.pk }}, this.checked)">
+                <label class="form-check-label fw-semibold" for="pl_{{ pl.pk }}">
+                  <i class="bi bi-diagram-3"></i> {{ pl.name }}
+                </label>
+              </div>
+              <!-- Step selector (visible only when pipeline is checked) -->
+              <div id="step-sel-{{ pl.pk }}" class="ms-4 mt-1
+                   {% if pl.pk not in selected_pipeline_steps %}d-none{% endif %}">
+                <label class="form-label small text-muted mb-1">Paso a incluir:</label>
+                <select name="pipeline_step_{{ pl.pk }}" class="form-select form-select-sm">
+                  {% for step in steps %}
+                  <option value="{{ step.run_pk }}"
+                    {% if selected_pipeline_steps|default_if_none:"" %}
+                      {% if selected_pipeline_steps %}
+                        {% if step.run_pk == selected_pipeline_steps|default_if_none:"" %}selected{% endif %}
+                      {% endif %}
+                    {% endif %}>
+                    Paso {{ step.order|add:1 }} — {{ step.run_name }}
+                    {% if step.run_kge is not None %}(KGE {{ step.run_kge|floatformat:3 }}){% endif %}
+                  </option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            {% endwith %}
+            {% endfor %}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Variable + criterio + submit -->
+    <div class="col-lg-4">
+      <div class="card h-100">
+        <div class="card-header fw-semibold">
+          <i class="bi bi-graph-up"></i> Variable a comparar
+        </div>
+        <div class="card-body d-flex flex-column gap-3">
+
+          <!-- Variable selector -->
+          <div>
+            <label class="form-label small fw-semibold mb-1">Variable</label>
+            <select name="variable" class="form-select form-select-sm">
+              {% for val, lbl in variables %}
+              <option value="{{ val }}" {% if val == selected_variable %}selected{% endif %}>
+                {{ lbl }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Criterio de calidad (opcional) -->
+          <div class="border rounded p-2" style="background:#f8f9fa;">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" id="useCriterion"
+                     {% if criterion_value != '' %}checked{% endif %}
+                     onchange="toggleCriterion(this.checked)">
+              <label class="form-check-label small fw-semibold" for="useCriterion">
+                <i class="bi bi-dash-lg text-danger"></i> Agregar criterio de calidad
+              </label>
+            </div>
+            <div id="criterionFields" {% if criterion_value == '' %}style="display:none"{% endif %}>
+              <div class="mb-2">
+                <label class="form-label small text-muted mb-1">Valor (eje Y)</label>
+                <input type="number" name="criterion_value" step="any"
+                       class="form-control form-control-sm"
+                       placeholder="Ej: 4.0"
+                       value="{{ criterion_value }}">
+              </div>
+              <div>
+                <label class="form-label small text-muted mb-1">Etiqueta (opcional)</label>
+                <input type="text" name="criterion_label"
+                       class="form-control form-control-sm"
+                       placeholder="Ej: Límite OD decreto 3930"
+                       value="{{ criterion_label }}">
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary mt-auto">
+            <i class="bi bi-bar-chart-line"></i> Generar gráfica
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</form>
+
+<!-- Chart result -->
+{% if chart_data_url %}
+<div class="card">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-image"></i> Resultado
+  </div>
+  <div class="card-body text-center p-2">
+    <img src="{{ chart_data_url }}" alt="Comparación de escenarios"
+         class="img-fluid rounded" style="max-width: 960px; cursor: zoom-in;"
+         onclick="window.open(this.src, '_blank')">
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleStepSel(plPk, visible) {
+  const el = document.getElementById('step-sel-' + plPk);
+  if (el) el.classList.toggle('d-none', !visible);
+}
+
+// Restore step-sel visibility on page load (in case of POST re-render)
+document.querySelectorAll('input[name="pipeline_ids"]').forEach(cb => {
+  toggleStepSel(cb.value, cb.checked);
+});
+
+function toggleCriterion(visible) {
+  const fields = document.getElementById('criterionFields');
+  if (fields) fields.style.display = visible ? '' : 'none';
+  if (!visible) {
+    // Clear values so they are not sent
+    document.querySelector('input[name="criterion_value"]').value = '';
+    document.querySelector('input[name="criterion_label"]').value = '';
+  }
+}
+</script>
+{% endblock %}

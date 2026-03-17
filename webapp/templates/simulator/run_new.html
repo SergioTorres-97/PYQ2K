@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Nueva ejecución{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a href="{% url 'simulator:project_detail' project.pk %}" class="text-muted text-decoration-none small">
+    <i class="bi bi-arrow-left"></i> {{ project.name }}
+  </a>
+  <h3 class="mt-1">Nueva ejecución — Paso 1: Datos de entrada</h3>
+</div>
+
+<form method="post" enctype="multipart/form-data" id="run-new-form"
+      onsubmit="return handleSubmit()">
+  {% csrf_token %}
+
+  <div class="card mb-4">
+    <div class="card-body">
+      <h6 class="card-title fw-semibold">Método de ingreso</h6>
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="radio" name="input_method" value="upload" id="rb-upload" checked>
+        <label class="form-check-label" for="rb-upload">
+          <i class="bi bi-file-earmark-excel"></i> Subir Excel (PlantillaBaseQ2K.xlsx)
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="input_method" value="manual" id="rb-manual">
+        <label class="form-check-label" for="rb-manual">
+          <i class="bi bi-table"></i> Ingresar datos manualmente
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload section -->
+  <div id="section-upload" class="card mb-4">
+    <div class="card-body">
+      <label class="form-label fw-semibold">Archivo Excel</label>
+      <input type="file" name="uploaded_excel" class="form-control" accept=".xlsx">
+      <div class="form-text">
+        El archivo debe tener 3 hojas: <code>REACHES</code>, <code>SOURCES</code>, <code>WQ_DATA</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual section: interactive table editor -->
+  <div id="section-manual" class="d-none">
+    <div class="card mb-4">
+      <div class="card-header fw-semibold">
+        Datos de entrada
+        <span class="text-muted fw-normal small ms-2">— completa los tramos, fuentes y estaciones de muestreo</span>
+      </div>
+      <div class="card-body pb-0">
+        {% include "simulator/partials/manual_tables.html" %}
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="submit" class="btn btn-primary">
+      Siguiente <i class="bi bi-arrow-right"></i>
+    </button>
+    <a href="{% url 'simulator:project_detail' project.pk %}" class="btn btn-outline-secondary">Cancelar</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const rbUpload = document.getElementById('rb-upload');
+const rbManual = document.getElementById('rb-manual');
+const secUpload = document.getElementById('section-upload');
+const secManual = document.getElementById('section-manual');
+
+function toggleMethod() {
+  if (rbManual.checked) {
+    secUpload.classList.add('d-none');
+    secManual.classList.remove('d-none');
+  } else {
+    secUpload.classList.remove('d-none');
+    secManual.classList.add('d-none');
+  }
+}
+rbUpload.addEventListener('change', toggleMethod);
+rbManual.addEventListener('change', toggleMethod);
+
+function handleSubmit() {
+  if (rbManual.checked) {
+    mtSerializeAll();
+  }
+  return true;
+}
+</script>
+{% endblock %}
