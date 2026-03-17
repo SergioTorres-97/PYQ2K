@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import shutil
 from typing import Dict, Any
 from .config import Q2KConfig
 from qual2k.processing.data_processor import Q2KDataProcessor
@@ -169,10 +170,22 @@ class Q2KModel:
         print('EJECUTANDO SIMULACIÓN FORTRAN')
         print("=" * 70)
 
-        exe_path = os.path.join(
-            self.config.header_dict['filedir'],
-            'q2kfortran2_12.exe'
-        )
+        exe_name = 'q2kfortran2_12.exe'
+        exe_path = os.path.join(self.config.header_dict['filedir'], exe_name)
+
+        # Copiar el ejecutable desde bin/ si no está ya en filedir
+        if not os.path.exists(exe_path):
+            bin_exe = os.path.join(
+                os.path.dirname(__file__), '..', '..', 'bin', exe_name
+            )
+            bin_exe = os.path.abspath(bin_exe)
+            if not os.path.exists(bin_exe):
+                raise FileNotFoundError(
+                    f"No se encontró el ejecutable FORTRAN en: {bin_exe}\n"
+                    f"Asegúrate de que 'bin/{exe_name}' existe en la raíz del proyecto."
+                )
+            shutil.copy2(bin_exe, exe_path)
+
         ejecutar_simulacion(exe_path)
 
         print(f'✅ Simulación ejecutada satisfactoriamente')

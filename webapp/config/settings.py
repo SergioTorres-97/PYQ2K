@@ -126,5 +126,5 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # QUAL2K specific
 PYQK_ROOT = BASE_DIR.parent
-Q2K_EXE_MASTER = BASE_DIR.parent / 'data' / 'templates' / 'Canal_vargas' / 'Comprobacion' / 'q2kfortran2_12.exe'
+Q2K_EXE_MASTER = BASE_DIR.parent / 'bin' / 'q2kfortran2_12.exe'
 Q2K_RUNS_DIR = 'runs'
