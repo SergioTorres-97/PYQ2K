@@ -1,6 +1,6 @@
 # PYQ2K — Interfaz Python para QUAL2K
 
-PYQ2K es una interfaz en Python para el modelo de calidad de agua **QUAL2K** (Quality 2K), cuyo motor de cálculo es un ejecutable FORTRAN. Automatiza la preparación de datos desde plantillas Excel, la ejecución del modelo, el análisis de resultados y la calibración mediante algoritmo genético.
+PYQ2K es una interfaz en Python para el modelo de calidad de agua **QUAL2K**, cuyo motor de cálculo es un ejecutable FORTRAN. Automatiza la preparación de datos desde plantillas Excel, la ejecución del modelo, el análisis de resultados y la calibración mediante algoritmo genético.
 
 ## Modos de uso
 
