@@ -1,245 +1,185 @@
-# Modelo Q2K Python
+# PYQ2K — Interfaz Python para QUAL2K
 
-## Descripción General
+PYQ2K es una interfaz en Python para el modelo de calidad de agua **QUAL2K** (Quality 2K), cuyo motor de cálculo es un ejecutable FORTRAN. Automatiza la preparación de datos desde plantillas Excel, la ejecución del modelo, el análisis de resultados y la calibración mediante algoritmo genético.
 
-Este proyecto es una **implementación en Python del modelo de calidad del agua QUAL2K**. QUAL2K (Quality Model for Streams and Rivers version 2K) es un modelo ampliamente utilizado para simular la calidad del agua en ríos y arroyos.
+## Modos de uso
 
-El proyecto proporciona:
-- Una interfaz Python para el ejecutable FORTRAN de QUAL2K
-- Procesamiento automatizado de datos desde plantillas Excel
-- Gestión de configuración y parámetros del modelo
-- Análisis de resultados y visualización
-- Calibración del modelo usando métricas KGE (Kling-Gupta Efficiency)
+PYQ2K se puede usar de **dos maneras**, según el nivel de interacción requerido:
 
-## Estructura del Proyecto
+---
 
-```
-Modelo_Q2K_python/
-│
-├── qual2k/                          # Paquete principal
-│   ├── core/                        # Funcionalidad central
-│   │   ├── model.py                 # Orquestador principal Q2KModel
-│   │   ├── config.py                # Gestión de configuración
-│   │   └── simulator.py             # Wrapper para ejecución FORTRAN
-│   │
-│   ├── processing/                  # Procesamiento de datos
-│   │   ├── data_processor.py        # Conversión Excel → Diccionario
-│   │   └── file_writer.py           # Diccionario → archivo .q2k
-│   │
-│   └── analysis/                    # Análisis de resultados
-│       ├── results_analyzer.py      # Parser de archivos .out
-│       ├── plotter.py               # Visualización
-│       └── metricas.py              # Métricas estadísticas
-│
-├── data/                            # Plantillas de datos
-│   └── templates/
-│       ├── Chicamocha/              # Caso de estudio Río Chicamocha
-│       ├── Canal_vargas/
-│       └── Tramo_3s/
-│
-└── tests/                           # Scripts de prueba
-    └── uso_basico.py                # Ejemplo de uso básico
-```
+### Modo 1 — Scripts Python (`model/`)
 
-## Tecnologías Utilizadas
+Ideal para correr simulaciones directamente desde la terminal, con control total sobre los parámetros. Los scripts en `model/` están listos para ejecutarse con los casos de estudio calibrados.
 
-### Dependencias Principales:
-- **pandas** (2.3.3): Manipulación de datos y lectura/escritura de Excel
-- **numpy** (2.3.5): Cálculos numéricos y operaciones con arrays
-- **matplotlib** + **seaborn**: Visualización de datos
-- **openpyxl** (3.1.5): Lectura/escritura de archivos Excel
-- **Python 3.13**: Características modernas de Python
-
-### Componentes Externos:
-- **Ejecutable FORTRAN QUAL2K** (q2kfortran2_12.exe): Motor de simulación
-- **Plantillas Excel**: Formato estructurado de datos de entrada
-
-## Funcionalidades Principales
-
-### 1. Entrada y Procesamiento de Datos
-- **Lectura de Plantillas Excel**: Carga datos de calidad del agua desde hojas estructuradas (REACHES, SOURCES, WQ_DATA)
-- **Transformación de Datos**: Convierte datos crudos a formatos compatibles con QUAL2K:
-  - DBO5 → DBO lento/rápido
-  - Cálculos de especies de nitrógeno (TKN, NH4, NO3)
-  - Fraccionamiento de fósforo
-  - Partición de sólidos suspendidos
-- **Configuración de Tramos**: Define segmentos del río con geometría hidráulica y perfiles de elevación
-
-### 2. Configuración del Modelo
-- **Gestión de Tasas Cinéticas**: Control sobre más de 60 parámetros cinéticos:
-  - Ciclo del carbono (hidrólisis y descomposición de CBOD)
-  - Ciclo del nitrógeno (nitrificación, denitrificación)
-  - Ciclo del fósforo
-  - Crecimiento/respiración de algas
-  - Tasas de reaireación
-- **Tasas Específicas por Tramo**: Permite personalización por cada tramo del río
-- **Condiciones de Frontera**: Cabeceras, fuentes puntuales, datos meteorológicos
-
-### 3. Generación de Archivos
-- **Escritor de Archivos Q2K**: Crea archivos .q2k con formato adecuado
-- **Archivo de Mensajes**: Genera message.DAT para configurar rutas de ejecución FORTRAN
-
-### 4. Ejecución de Simulación
-- **Wrapper FORTRAN**: Ejecuta el binario compilado de QUAL2K
-- **Gestión de Directorios**: Maneja cambios de directorio de trabajo para la simulación
-
-### 5. Análisis de Resultados
-- **Parsing de Salidas**: Extrae datos de archivos .out conteniendo:
-  - Hidráulica (caudal, velocidad, sección transversal, tiempo de viaje)
-  - Perfiles de temperatura
-  - 31 parámetros de calidad del agua a lo largo del río
-- **Fusión de Datos**: Combina datos modelados y observados para comparación
-- **Evaluación Estadística**:
-  - **KGE** (Kling-Gupta Efficiency): Métrica principal de calibración
-  - **NSE** (Nash-Sutcliffe Efficiency)
-  - **RMSE** (Error Cuadrático Medio)
-  - **PBIAS** (Sesgo Porcentual)
-- **KGE Global Ponderado**: Combina múltiples KGEs de parámetros con pesos definidos por el usuario
-
-### 6. Visualización
-- **Perfiles Longitudinales**: Graficación automatizada de todos los parámetros de calidad del agua vs. distancia
-- **Gráficos de Comparación**: Visualización de datos modelados vs. observados
-- **Gráficos Listos para Publicación**: Formato profesional con cuadrículas, leyendas y estilos
-
-## Cómo Usar el Proyecto
-
-### Instalación
-
-1. Clonar el repositorio
-2. Instalar dependencias:
 ```bash
-pip install pandas numpy matplotlib seaborn openpyxl
+# Ejecutar un modelo individual
+python model/modelo_vargas.py
+python model/modelo_tota_chiquito.py
+python model/modelo_chicamocha.py
+
+# Ejecutar el pipeline completo (Vargas → Tramo 3S → Chicamocha)
+python model/pipeline_modelo_calidad.py
 ```
 
-### Uso Básico
+Ver [`model/README.md`](model/README.md) para más detalle.
 
-```python
-from qual2k.core.model import Q2KModel
+---
 
-# 1. Definir información del encabezado
-header_dict = {
-    'nombre_rio': 'Chicamocha',
-    'fecha': '01/01/2024',
-    'hora': 1200,
-    'zona_horaria': -5,
-    'metodo_integracion': 1,
-    'latitud': 6.0,
-    'longitud': -73.0,
-    'altitud': 2500.0
-}
+### Modo 2 — Aplicación web Django (`webapp/`)
 
-# 2. Crear instancia del modelo
-filepath = r'data\templates\Chicamocha\PlantillaBaseQ2K.xlsx'
-model = Q2KModel(filepath, header_dict)
+Interfaz gráfica en el navegador para gestionar proyectos, configurar y lanzar simulaciones, y visualizar resultados sin escribir código.
 
-# 3. Ejecutar flujo completo
-model.cargar_plantillas()           # Cargar plantillas Excel
-model.configurar_modelo()           # Configurar parámetros
-model.generar_archivo_q2k()         # Generar archivo .q2k
-model.ejecutar_simulacion()         # Ejecutar FORTRAN
-model.analizar_resultados()         # Analizar y graficar resultados
-
-# 4. Calcular métricas de calibración
-resultados, kge_global = model.calcular_metricas_calibracion(
-    parametros=['OD', 'DBO', 'NH4'],
-    pesos={'OD': 0.5, 'DBO': 0.3, 'NH4': 0.2}
-)
-
-print(f"KGE Global: {kge_global}")
+```bash
+# Levantar el servidor
+cd webapp
+python manage.py runserver 8080
 ```
 
-## Flujo de Trabajo
+Abre `http://localhost:8080` en el navegador.
 
-```
-┌─────────────────────────────────────┐
-│ 1. Preparar datos en Excel          │
-│    (PlantillaBaseQ2K.xlsx)          │
-│    - REACHES: Segmentos del río     │
-│    - SOURCES: Fuentes puntuales     │
-│    - WQ_DATA: Datos de calidad      │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ 2. Python procesa los datos         │
-│    (data_processor.py)              │
-│    - Transformación de formatos     │
-│    - Conversiones de unidades       │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ 3. Aplicar configuración            │
-│    (config.py)                      │
-│    - Tasas cinéticas                │
-│    - Parámetros del modelo          │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ 4. Generar archivo .q2k             │
-│    (file_writer.py)                 │
-│    - Formato específico FORTRAN     │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ 5. Ejecutar simulación FORTRAN      │
-│    (simulator.py)                   │
-│    - Produce archivo .out           │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ 6. Analizar resultados              │
-│    (results_analyzer.py)            │
-│    - Parsear archivos .out          │
-│    - Convertir a DataFrames         │
-└──────────────┬──────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────┐
-│ 7. Visualización y métricas         │
-│    (plotter.py, metricas.py)        │
-│    - Gráficos de perfiles           │
-│    - Cálculo de KGE, NSE, RMSE      │
-│    - Comparación modelado vs obs.   │
-└─────────────────────────────────────┘
+**Funcionalidades de la webapp:**
+- Gestión de proyectos y simulaciones
+- Configuración de parámetros cinéticos desde formularios
+- Ejecución asíncrona de simulaciones
+- Visualización de gráficos y métricas KGE en el navegador
+- Pipeline multi-tramo desde la interfaz
+
+---
+
+## Instalación
+
+### 1. Clonar el repositorio
+
+```bash
+git clone https://github.com/SergioTorres-97/PYQ2K.git
+cd PYQ2K
 ```
 
-## Archivos Principales
+### 2. Crear entorno virtual e instalar dependencias
 
-### qual2k/core/model.py
-Clase principal `Q2KModel` que orquesta todo el flujo de trabajo. Coordina la carga de datos, configuración, simulación y análisis.
+```bash
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/Mac
 
-### qual2k/core/config.py
-Gestiona todos los parámetros de configuración de QUAL2K. Proporciona valores por defecto para tasas cinéticas, datos de luz, hidráulica, etc.
+# Dependencias del paquete core
+pip install -e .
 
-### qual2k/processing/data_processor.py
-Convierte datos de plantillas Excel en estructuras de diccionarios compatibles con QUAL2K. Procesa tramos, fuentes puntuales, cabeceras, datos meteorológicos y de calidad del agua.
+# Dependencias adicionales para la webapp
+pip install -r webapp/requirements_web.txt
+```
 
-### qual2k/processing/file_writer.py
-Genera archivos de entrada .q2k en formato compatible con FORTRAN. Maneja el formato de números para notación científica y valores especiales.
+### 3. Configurar la webapp (solo si se usa el Modo 2)
 
-### qual2k/analysis/results_analyzer.py
-Analiza archivos de salida .out de simulaciones QUAL2K. Extrae resultados hidráulicos, de temperatura y de calidad del agua.
+```bash
+cd webapp
+python manage.py migrate
+python manage.py createsuperuser
+```
 
-### qual2k/analysis/plotter.py
-Genera gráficos de calidad profesional de los resultados de simulación. Crea perfiles longitudinales para todos los parámetros de calidad del agua.
+### 4. Plantillas de datos
 
-### qual2k/analysis/metricas.py
-Calcula métricas de evaluación estadística: KGE, NSE, RMSE, PBIAS. Utilizado para calibración y validación del modelo.
+Los scripts de `model/` y la webapp requieren plantillas Excel (`PlantillaBaseQ2K.xlsx`) para cada tramo.
+Estas plantillas **no están incluidas en el repositorio** y deben colocarse en:
 
-## Caso de Estudio: Río Chicamocha
+```
+data/templates/<nombre_tramo>/PlantillaBaseQ2K.xlsx
+```
 
-El proyecto incluye un caso de estudio completo del Río Chicamocha con:
-- 70 tramos del río
-- 109 fuentes puntuales
-- Datos de calidad del agua observados
-- Configuración meteorológica
+El ejecutable FORTRAN `bin/q2kfortran2_12.exe` **sí está incluido** y se copia automáticamente al directorio de trabajo al ejecutar cada simulación.
 
-Este caso puede usarse como plantilla para otros estudios de calidad del agua en ríos.
+---
 
-## Contribuciones
+## Estructura del proyecto
 
-Este es un marco de modelación científica que une el modelo FORTRAN QUAL2K con herramientas modernas de ciencia de datos en Python, haciendo la modelación de calidad del agua más accesible y automatizada.
+```
+PYQ2K/
+├── bin/
+│   └── q2kfortran2_12.exe        # Ejecutable FORTRAN (motor de cálculo)
+│
+├── qual2k/                        # Paquete Python principal
+│   ├── core/
+│   │   ├── model.py               # Q2KModel — orquestador principal
+│   │   ├── config.py              # Gestión de parámetros y tasas cinéticas
+│   │   ├── simulator.py           # Wrapper para ejecución del .exe
+│   │   ├── calibrator.py          # Calibración con algoritmo genético (pygad)
+│   │   └── calibrator_general.py  # Pipeline de calibración
+│   ├── processing/
+│   │   ├── data_processor.py      # Lee Excel → diccionarios
+│   │   └── file_writer.py         # Escribe archivos .q2k
+│   └── analysis/
+│       ├── results_analyzer.py    # Parsea archivos .out
+│       ├── plotter.py             # Gráficos de resultados
+│       └── metricas.py            # KGE, NSE, RMSE, PBIAS
+│
+├── model/                         # Scripts de simulación (Modo 1)
+│   ├── modelo_vargas.py
+│   ├── modelo_tota_chiquito.py
+│   ├── modelo_chicamocha.py
+│   └── pipeline_modelo_calidad.py
+│
+├── webapp/                        # Aplicación web Django (Modo 2)
+│   ├── apps/simulator/            # App principal
+│   ├── templates/                 # HTML
+│   ├── config/                    # Settings de Django
+│   └── manage.py
+│
+├── tests/                         # Scripts de prueba y calibración
+├── data/                          # Plantillas Excel (no versionadas)
+│   └── templates/
+└── pyproject.toml
+```
+
+---
+
+## Flujo interno
+
+```
+PlantillaBaseQ2K.xlsx
+        │
+        ▼ data_processor.py
+  Diccionarios Python
+        │
+        ▼ config.py
+  Tasas cinéticas + parámetros
+        │
+        ▼ file_writer.py
+   Archivo .q2k
+        │
+        ▼ simulator.py  (invoca q2kfortran2_12.exe)
+   Archivo .out
+        │
+        ▼ results_analyzer.py
+   DataFrame de resultados
+        │
+        ▼ plotter.py + metricas.py
+  Gráficos + KGE / NSE / RMSE
+```
+
+---
+
+## Caso de estudio: cuenca del río Chicamocha
+
+Incluye tres modelos encadenados calibrados con datos observados:
+
+| Tramo | Reaches | Fuentes puntuales |
+|---|---|---|
+| Canal Vargas | 4 | — |
+| Tramo 3S (R. Tota-Chiquito) | 5 | 1 (salida Canal Vargas) |
+| Río Chicamocha | 7 | 1 (salida Tramo 3S) |
+
+La métrica de calibración principal es el **KGE (Kling-Gupta Efficiency)**, calculado sobre múltiples parámetros de calidad del agua (OD, DBO, NTK, NH₄, fósforo, *E. coli*, entre otros).
+
+---
+
+## Dependencias principales
+
+| Paquete | Uso |
+|---|---|
+| `pandas` | Lectura de Excel y manejo de resultados |
+| `numpy` | Cálculos numéricos |
+| `matplotlib` / `seaborn` | Visualización |
+| `openpyxl` | Lectura/escritura de archivos Excel |
+| `pygad` | Algoritmo genético para calibración |
+| `Django` | Interfaz web (Modo 2) |
