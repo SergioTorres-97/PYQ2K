@@ -65,7 +65,7 @@ class Q2KConfig:
             # --- LÍNEA 2: Reaireación térmica y O2 estequiométrico ---
             "tka": 1.024,     # qa: Correccion de temperatura para reareacion
             "roc": 2.69,      # roc: O2 consumido por oxidacion de carbono (gO2/gC)
-            "ron": 4570.0,    # ron: O2 consumido por nitrificacion (gO2/gN) *Nota: ya multiplicado para el .q2k
+            "ron": 4.570,    # ron: O2 consumido por nitrificacion (gO2/gN) *Nota: ya multiplicado para el .q2k
 
             # --- LÍNEA 3: Inhibición O2, CBOD lento, CBOD rápido y N Orgánico ---
             "Ksocf": 0.6,     # Param. inhibicion O2 oxidacion CBOD rapido

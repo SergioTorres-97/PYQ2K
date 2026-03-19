@@ -179,8 +179,7 @@ class Calibracion:
     def _inicializar_modelo(self) -> Q2KModel:
         """Crea una instancia temporal del modelo para obtener configuración."""
         model = Q2KModel(self.filepath, self.header_dict)
-        plantilla = os.path.join(self.filepath, 'PlantillaBaseQ2K.xlsx')
-        model.cargar_plantillas(plantilla)
+        model.cargar_plantillas('PlantillaBaseQ2K.xlsx')
         return model
 
     def _configurar_genes(self):
@@ -260,7 +259,7 @@ class Calibracion:
             header_dict_temp['filedir'] = temp_dir
 
             model = Q2KModel(temp_dir, header_dict_temp)
-            model.cargar_plantillas(plantilla_destino)
+            model.cargar_plantillas('PlantillaBaseQ2K.xlsx')
 
             # Decodificar parámetros
             params = {
@@ -838,8 +837,7 @@ class Calibracion:
         print('=' * 80)
 
         model_final = Q2KModel(self.filepath, self.header_dict)
-        plantilla = os.path.join(self.filepath, 'PlantillaBaseQ2K.xlsx')
-        model_final.cargar_plantillas(plantilla)
+        model_final.cargar_plantillas('PlantillaBaseQ2K.xlsx')
 
         params_final = self._decodificar_solucion(solution)
 
