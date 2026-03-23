@@ -14,6 +14,7 @@ import os
 import glob
 import shutil
 import tempfile
+import threading
 import multiprocessing as mp
 import warnings
 from typing import Dict, List, Tuple, Optional, Any, Union
@@ -334,7 +335,7 @@ class CalibracionGlobal:
         self.ga_instance            = None
         self.mejor_solucion         = None
         self.historial_generaciones = []
-        self.pool                   = None
+        self._lock                  = threading.Lock()
 
     # ── Inicialización ────────────────────────────────────────────────────────
 
@@ -377,9 +378,15 @@ class CalibracionGlobal:
     # ── GA callbacks ──────────────────────────────────────────────────────────
 
     def _fitness_function(self, ga, solution, solution_idx):
-        """Corre el pipeline completo y retorna el KGE de Chicamocha como fitness."""
-        self.contador_evaluaciones += 1
-        eval_id = self.contador_evaluaciones
+        """Corre el pipeline completo y retorna el KGE de Chicamocha como fitness.
+
+        PyGAD llama esta función desde N threads simultáneos cuando se usa
+        parallel_processing=['thread', N]. El Lock protege el contador y el
+        registro del mejor KGE.
+        """
+        with self._lock:
+            self.contador_evaluaciones += 1
+            eval_id = self.contador_evaluaciones
 
         args = (
             solution, eval_id,
@@ -390,17 +397,14 @@ class CalibracionGlobal:
             self.pesos_kge,
         )
 
-        if self.usar_paralelo and self.pool is not None:
-            resultado = self.pool.apply_async(_evaluar_pipeline_worker, (args,))
-            _, kge = resultado.get(timeout=600)
-        else:
-            _, kge = _evaluar_pipeline_worker(args)
+        _, kge = _evaluar_pipeline_worker(args)
 
-        if kge > self.mejor_kge:
-            self.mejor_kge = kge
-            print(f"  *** Eval {eval_id} | NUEVO MEJOR KGE Chicamocha: {kge:.4f} ***")
-        elif eval_id % 5 == 0:
-            print(f"Eval {eval_id} | KGE Chicamocha: {kge:.4f}")
+        with self._lock:
+            if kge > self.mejor_kge:
+                self.mejor_kge = kge
+                print(f"  *** Eval {eval_id} | NUEVO MEJOR KGE Chicamocha: {kge:.4f} ***")
+            elif eval_id % 5 == 0:
+                print(f"Eval {eval_id} | KGE Chicamocha: {kge:.4f}")
 
         return kge
 
@@ -455,9 +459,6 @@ class CalibracionGlobal:
               f'{self.n_tramo3s * len(self.parametros_tramo3s)} Tramo3S + '
               f'{self.n_chicamocha * len(self.parametros_chicamocha)} Chicamocha)\n')
 
-        if self.usar_paralelo:
-            self.pool = mp.Pool(processes=self.num_workers)
-
         try:
             ga_kwargs = dict(
                 num_generations=self.num_generations,
@@ -489,6 +490,8 @@ class CalibracionGlobal:
                 ga_kwargs['random_mutation_min_val'] = self.random_mutation_min_val
             if self.random_mutation_max_val is not None:
                 ga_kwargs['random_mutation_max_val'] = self.random_mutation_max_val
+            if self.usar_paralelo:
+                ga_kwargs['parallel_processing'] = ['thread', self.num_workers]
 
             self.ga_instance = pygad.GA(**ga_kwargs)
             self.ga_instance.run()
@@ -501,11 +504,8 @@ class CalibracionGlobal:
 
             return self.mejor_solucion, self.mejor_kge
 
-        finally:
-            if self.pool is not None:
-                self.pool.close()
-                self.pool.join()
-                self.pool = None
+        except Exception:
+            raise
 
     # ── Resultados ────────────────────────────────────────────────────────────
 

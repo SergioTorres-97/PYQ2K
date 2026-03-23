@@ -108,27 +108,27 @@ def main():
         parametros_chicamocha=parametros_chicamocha,
 
         # ===== PARÁMETROS DEL GA =====
-        num_generations=50,
-        population_size=30,
-        num_parents_mating=15,
+        num_generations=150,
+        population_size=50,
+        num_parents_mating=25,
 
         parent_selection_type="tournament",
         k_tournament=3,
 
         crossover_type="uniform",
-        crossover_probability=0.80,
+        crossover_probability=0.85,
 
         mutation_type="adaptive",
-        mutation_probability=[0.30, 0.10],
+        mutation_probability=[0.35, 0.08],
         mutation_percent_genes=20,
 
-        keep_elitism=3,
+        keep_elitism=5,
 
-        stop_criteria="saturate_15",
+        stop_criteria="saturate_20",
 
         random_seed=42,
         usar_paralelo=True,
-        num_workers=4,
+        num_workers=max(1, mp.cpu_count() - 1),
     )
 
     try:
