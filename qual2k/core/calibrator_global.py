@@ -240,12 +240,12 @@ def _evaluar_pipeline_worker(args: Tuple) -> Tuple[int, float]:
         model_c.ejecutar_simulacion()
         model_c.analizar_resultados(generar_graficas=False)
 
-        _, kge = model_c.calcular_metricas_calibracion(pesos=pesos_kge)
-        return (eval_id, float(kge))
+        metricas, kge = model_c.calcular_metricas_calibracion(pesos=pesos_kge)
+        return (eval_id, float(kge), metricas)
 
     except Exception as e:
         print(f'Error en evaluación {eval_id}: {e}')
-        return (eval_id, -999.0)
+        return (eval_id, -999.0, {})
 
     finally:
         for d in [temp_vargas, temp_tramo3s, temp_chicamocha]:
@@ -327,6 +327,7 @@ class CalibracionGlobal:
         # Estado
         self.contador_evaluaciones  = 0
         self.mejor_kge              = -999.0
+        self.mejor_metricas         = {}
         self.n_vargas               = 0
         self.n_tramo3s              = 0
         self.n_chicamocha           = 0
@@ -397,11 +398,12 @@ class CalibracionGlobal:
             self.pesos_kge,
         )
 
-        _, kge = _evaluar_pipeline_worker(args)
+        _, kge, metricas = _evaluar_pipeline_worker(args)
 
         with self._lock:
             if kge > self.mejor_kge:
                 self.mejor_kge = kge
+                self.mejor_metricas = metricas
                 print(f"  *** Eval {eval_id} | NUEVO MEJOR KGE Chicamocha: {kge:.4f} ***")
             elif eval_id % 5 == 0:
                 print(f"Eval {eval_id} | KGE Chicamocha: {kge:.4f}")
@@ -425,12 +427,26 @@ class CalibracionGlobal:
         }
         self.historial_generaciones.append(stats)
 
-        print(f'\n{"=" * 60}')
-        print(f'GENERACIÓN {gen:3d} | '
-              f'Mejor gen: {stats["mejor_fitness"]:.4f} | '
-              f'Mejor global: {self.mejor_kge:.4f} | '
+        print(f'\n{"=" * 65}')
+        print(f'  GENERACIÓN {gen:3d}')
+        print(f'  Mejor gen : {stats["mejor_fitness"]:.4f}  |  '
+              f'Mejor global: {self.mejor_kge:.4f}  |  '
               f'Promedio: {stats["promedio"]:.4f} ± {stats["std"]:.4f}')
-        print('=' * 60)
+
+        if self.mejor_metricas:
+            print(f'  {"─" * 61}')
+            print(f'  {"Variable":<32} {"KGE":>8}  {"Peso":>6}  {"Contribución":>12}')
+            print(f'  {"─" * 61}')
+            kge_total = 0.0
+            for var, kge_var in self.mejor_metricas.items():
+                peso = self.pesos_kge.get(var, 0.0)
+                contrib = kge_var * peso
+                kge_total += contrib
+                print(f'  {var:<32} {kge_var:>8.4f}  {peso:>6.2f}  {contrib:>12.4f}')
+            print(f'  {"─" * 61}')
+            print(f'  {"KGE PONDERADO GLOBAL (Chicamocha)":<32} {kge_total:>8.4f}')
+
+        print('=' * 65)
 
     # ── Ejecución ─────────────────────────────────────────────────────────────
 
@@ -506,6 +522,114 @@ class CalibracionGlobal:
 
         except Exception:
             raise
+
+    def correr_mejor_solucion(self, output_dir: str) -> None:
+        """
+        Re-corre el pipeline completo con los mejores parámetros y guarda
+        todos los outputs (CSVs, gráficas comparativas) en output_dir.
+
+        Crea la estructura:
+            output_dir/
+                Canal_vargas/resultados/
+                Tramo_3s/resultados/
+                Chicamocha/resultados/
+                            comparacion/
+        """
+        if self.mejor_solucion is None:
+            print("No hay solución calibrada. Ejecuta primero ejecutar().")
+            return
+
+        params = self.get_parametros_calibrados()
+        os.makedirs(output_dir, exist_ok=True)
+
+        print(f'\n{"=" * 65}')
+        print('  RE-CORRIDA FINAL CON MEJORES PARÁMETROS')
+        print(f'  Output: {output_dir}')
+        print('=' * 65)
+
+        # Directorios de trabajo (permanentes dentro de output_dir)
+        dir_v = os.path.join(output_dir, 'Canal_vargas')
+        dir_t = os.path.join(output_dir, 'Tramo_3s')
+        dir_c = os.path.join(output_dir, 'Chicamocha')
+        for d in [dir_v, dir_t, dir_c]:
+            os.makedirs(d, exist_ok=True)
+
+        _copiar_directorio(self.config_vargas['filepath'],     dir_v)
+        _copiar_directorio(self.config_tramo3s['filepath'],    dir_t)
+        _copiar_directorio(self.config_chicamocha['filepath'], dir_c)
+
+        # ── 1. Canal Vargas ──────────────────────────────────────────────────
+        print('\n  [1/3] Canal Vargas...')
+        header_v = {**self.config_vargas['header_dict'], 'filedir': dir_v}
+        model_v = Q2KModel(dir_v, header_v)
+        model_v.cargar_plantillas()
+        model_v.configurar_modelo(
+            reach_rates_custom=_construir_reach_rates(model_v, self.n_vargas, params['vargas']),
+            q_cabecera=self.config_vargas['q_cabecera'],
+        )
+        model_v.generar_archivo_q2k()
+        model_v.ejecutar_simulacion()
+        model_v.analizar_resultados(generar_graficas=True)
+
+        csv_vargas = os.path.join(dir_v, 'resultados', f"{self.config_vargas['header_dict']['filename']}.csv")
+
+        # ── 2. Tramo 3S ──────────────────────────────────────────────────────
+        print('\n  [2/3] Tramo 3S...')
+        _actualizar_vertimiento(
+            filepath_resultados=csv_vargas,
+            filepath_excel=os.path.join(dir_t, 'PlantillaBaseQ2K.xlsx'),
+            nombre_vertimiento='CANAL VARGAS',
+        )
+        header_t = {**self.config_tramo3s['header_dict'], 'filedir': dir_t}
+        model_t = Q2KModel(dir_t, header_t)
+        model_t.cargar_plantillas()
+        model_t.configurar_modelo(
+            reach_rates_custom=_construir_reach_rates(model_t, self.n_tramo3s, params['tramo3s']),
+            q_cabecera=self.config_tramo3s['q_cabecera'],
+        )
+        model_t.generar_archivo_q2k()
+        model_t.ejecutar_simulacion()
+        model_t.analizar_resultados(generar_graficas=True)
+
+        csv_tramo3s = os.path.join(dir_t, 'resultados', f"{self.config_tramo3s['header_dict']['filename']}.csv")
+
+        # ── 3. Chicamocha ────────────────────────────────────────────────────
+        print('\n  [3/3] Chicamocha...')
+        _actualizar_vertimiento(
+            filepath_resultados=csv_tramo3s,
+            filepath_excel=os.path.join(dir_c, 'PlantillaBaseQ2K.xlsx'),
+            nombre_vertimiento='R. CHIQUITO',
+        )
+        header_c = {**self.config_chicamocha['header_dict'], 'filedir': dir_c}
+        model_c = Q2KModel(dir_c, header_c)
+        model_c.cargar_plantillas()
+        model_c.configurar_modelo(
+            reach_rates_custom=_construir_reach_rates(model_c, self.n_chicamocha, params['chicamocha']),
+            q_cabecera=self.config_chicamocha['q_cabecera'],
+        )
+        model_c.config.actualizar_rates(kpath=0.05, aPath=0.001)
+        model_c.generar_archivo_q2k()
+        model_c.ejecutar_simulacion()
+        model_c.analizar_resultados(generar_graficas=True)
+
+        metricas, kge = model_c.calcular_metricas_calibracion(pesos=self.pesos_kge)
+
+        # ── Resumen final ────────────────────────────────────────────────────
+        print(f'\n{"=" * 65}')
+        print('  RESULTADOS FINALES — CHICAMOCHA (mejor solución)')
+        print(f'  {"─" * 61}')
+        print(f'  {"Variable":<32} {"KGE":>8}  {"Peso":>6}  {"Contribución":>12}')
+        print(f'  {"─" * 61}')
+        kge_total = 0.0
+        for var, kge_var in metricas.items():
+            peso = self.pesos_kge.get(var, 0.0)
+            contrib = kge_var * peso
+            kge_total += contrib
+            print(f'  {var:<32} {kge_var:>8.4f}  {peso:>6.2f}  {contrib:>12.4f}')
+        print(f'  {"─" * 61}')
+        print(f'  {"KGE PONDERADO GLOBAL":<32} {kge_total:>8.4f}')
+        print(f'{"=" * 65}')
+        print(f'\n  Outputs guardados en: {output_dir}\n')
 
     # ── Resultados ────────────────────────────────────────────────────────────
 

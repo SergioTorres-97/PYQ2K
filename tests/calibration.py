@@ -136,13 +136,14 @@ def main():
 
         calibrador.imprimir_parametros_calibrados()
 
-        output_dir = str(base / 'data/templates/Canal_vargas')
+        output_dir = str(base / 'data/resultados_calibracion')
         calibrador.plotear_evolucion_fitness(
-            filename=str(base / 'data/templates/evolucion_fitness_global.png')
+            filename=str(base / 'data/resultados_calibracion/evolucion_fitness_global.png')
         )
         calibrador.exportar_historial_csv(
-            filename=str(base / 'data/templates/historial_calibracion_global.csv')
+            filename=str(base / 'data/resultados_calibracion/historial_calibracion_global.csv')
         )
+        calibrador.correr_mejor_solucion(output_dir=output_dir)
 
         print("\n" + "=" * 80)
         print(f"✅ CALIBRACIÓN COMPLETADA  |  KGE Chicamocha: {kge:.6f}")
