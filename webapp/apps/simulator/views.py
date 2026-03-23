@@ -13,7 +13,7 @@ from django.views.decorators.http import require_POST
 
 from .forms import PipelineForm, ProjectForm, RunStep1Form, RunStep2Form
 from .models import PipelineRun, PipelineStep, Project, SimulationRun
-from .services import collect_graphs, generate_scenario_comparison
+from .services import build_scenario_csv, collect_graphs, collect_plotly_charts, generate_scenario_comparison
 from .tasks import launch_pipeline_async, launch_run_async
 
 
@@ -489,9 +489,12 @@ _RATE_LABELS = {
 def run_detail(request, pk):
     run = get_object_or_404(SimulationRun, pk=pk)
     kge_data = run.kge_by_var_json or {}
-    graphs = collect_graphs(run) if run.status == 'done' else {'profiles': [], 'comparacion': []}
+    is_done = run.status == 'done'
+    graphs = collect_graphs(run) if is_done else {'profiles': [], 'comparacion': []}
+    plotly_charts = collect_plotly_charts(run) if is_done else {'profiles': [], 'comparacion': []}
     return render(request, 'simulator/run_detail.html', {
         'run': run, 'kge_data': kge_data, 'graphs': graphs,
+        'plotly_charts': plotly_charts,
         'existing_rates': run.reach_rates_json or {},
         'rate_params': list(_RATE_LABELS.keys()),
         'rate_labels': _RATE_LABELS,
@@ -770,7 +773,8 @@ def project_scenarios(request, pk):
         if steps:
             pipeline_steps_ctx.append({'pipeline': pl, 'steps': steps})
 
-    chart_data_url = None
+    chart_json = None
+    chart_warnings = []
     selected_run_pks = []
     selected_pipeline_steps = {}   # {pipeline_pk: run_pk}
     selected_variable = 'dissolved_oxygen'
@@ -815,12 +819,12 @@ def project_scenarios(request, pk):
         if not all_runs:
             error = 'Selecciona al menos un escenario o paso de pipeline.'
         elif not error:
-            chart_data_url = generate_scenario_comparison(
+            chart_json, chart_warnings = generate_scenario_comparison(
                 all_runs, selected_variable, labels=labels,
                 criterion_value=criterion_value,
                 criterion_label=criterion_label,
             )
-            if chart_data_url is None:
+            if chart_json is None:
                 error = 'No se pudo generar la gráfica. Verifica que los escenarios tengan resultados.'
 
     return render(request, 'simulator/scenarios.html', {
@@ -828,7 +832,8 @@ def project_scenarios(request, pk):
         'done_runs': done_runs,
         'pipeline_steps_ctx': pipeline_steps_ctx,
         'variables': _SCENARIO_VARIABLES,
-        'chart_data_url': chart_data_url,
+        'chart_json': chart_json,
+        'chart_warnings': chart_warnings,
         'selected_run_pks': selected_run_pks,
         'selected_pipeline_steps': selected_pipeline_steps,
         'selected_variable': selected_variable,
@@ -836,6 +841,46 @@ def project_scenarios(request, pk):
         'criterion_label': criterion_label,
         'error': error,
     })
+
+
+def scenarios_download_csv(request, pk):
+    """Descarga CSV de la comparación de escenarios (mismos parámetros que project_scenarios)."""
+    if request.method != 'POST':
+        from django.http import HttpResponseNotAllowed
+        return HttpResponseNotAllowed(['POST'])
+
+    project = get_object_or_404(Project, pk=pk)
+    selected_run_pks = [int(x) for x in request.POST.getlist('run_ids')]
+    selected_variable = request.POST.get('variable', 'dissolved_oxygen')
+
+    # Pipeline steps
+    selected_pipeline_ids = [int(x) for x in request.POST.getlist('pipeline_ids')]
+    labels = {}
+    all_runs = list(SimulationRun.objects.filter(pk__in=selected_run_pks))
+
+    for pl_pk in selected_pipeline_ids:
+        run_pk_str = request.POST.get(f'pipeline_step_{pl_pk}', '')
+        if not run_pk_str:
+            continue
+        try:
+            pl = PipelineRun.objects.get(pk=pl_pk)
+            step = pl.steps.select_related('run').get(run__pk=int(run_pk_str))
+            run = step.run
+            all_runs.append(run)
+            labels[run.pk] = f'{pl.name} — Paso {step.order + 1} ({run.name})'
+        except Exception:
+            continue
+
+    csv_str = build_scenario_csv(all_runs, selected_variable, labels=labels)
+    if csv_str is None:
+        raise Http404('No hay datos para exportar.')
+
+    from django.http import HttpResponse
+    response = HttpResponse(csv_str, content_type='text/csv; charset=utf-8')
+    response['Content-Disposition'] = (
+        f'attachment; filename="comparacion_{selected_variable}.csv"'
+    )
+    return response
 
 
 # ─── Pipelines ───────────────────────────────────────────────────────────────
