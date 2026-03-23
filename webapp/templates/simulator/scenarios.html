@@ -16,6 +16,15 @@
 <div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> {{ error }}</div>
 {% endif %}
 
+{% if chart_warnings %}
+<div class="alert alert-warning">
+  <strong><i class="bi bi-exclamation-triangle"></i> Advertencias al generar la gráfica:</strong>
+  <ul class="mb-0 mt-1">
+    {% for w in chart_warnings %}<li>{{ w }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <form method="post">
   {% csrf_token %}
 
@@ -158,16 +167,23 @@
   </div>
 </form>
 
-<!-- Chart result -->
-{% if chart_data_url %}
+<!-- Chart result (Plotly interactivo) -->
+{% if chart_json %}
 <div class="card">
-  <div class="card-header fw-semibold">
-    <i class="bi bi-image"></i> Resultado
+  <div class="card-header fw-semibold d-flex align-items-center justify-content-between">
+    <span><i class="bi bi-bar-chart-line"></i> Resultado</span>
+    <!-- Hidden form that mirrors the main form's selections for CSV download -->
+    <form id="csv-download-form" method="post"
+          action="{% url 'simulator:scenarios_download_csv' project.pk %}">
+      {% csrf_token %}
+      <div id="csv-hidden-inputs"></div>
+      <button type="submit" class="btn btn-sm btn-outline-secondary">
+        <i class="bi bi-download"></i> Descargar CSV
+      </button>
+    </form>
   </div>
-  <div class="card-body text-center p-2">
-    <img src="{{ chart_data_url }}" alt="Comparación de escenarios"
-         class="img-fluid rounded" style="max-width: 960px; cursor: zoom-in;"
-         onclick="window.open(this.src, '_blank')">
+  <div class="card-body p-2">
+    <div id="scenario-chart" style="height:460px;"></div>
   </div>
 </div>
 {% endif %}
@@ -195,5 +211,59 @@ function toggleCriterion(visible) {
     document.querySelector('input[name="criterion_label"]').value = '';
   }
 }
+
+{% if chart_json %}
+// Mirror main form inputs into the CSV download form
+(function () {
+  const mainForm = document.querySelector('form[method="post"]:not(#csv-download-form)');
+  const csvContainer = document.getElementById('csv-hidden-inputs');
+  if (!mainForm || !csvContainer) return;
+  const selectors = [
+    'input[name="run_ids"]:checked',
+    'input[name="pipeline_ids"]:checked',
+    'select[name="variable"]',
+  ];
+  selectors.forEach(function (sel) {
+    mainForm.querySelectorAll(sel).forEach(function (el) {
+      const inp = document.createElement('input');
+      inp.type = 'hidden';
+      inp.name = el.name;
+      inp.value = el.tagName === 'SELECT' ? el.value : el.value;
+      csvContainer.appendChild(inp);
+    });
+  });
+  // Pipeline step selects: pipeline_step_<pk>
+  mainForm.querySelectorAll('select[name^="pipeline_step_"]').forEach(function (el) {
+    const inp = document.createElement('input');
+    inp.type = 'hidden';
+    inp.name = el.name;
+    inp.value = el.value;
+    csvContainer.appendChild(inp);
+  });
+})();
+
+(function () {
+  const figData = {{ chart_json|safe }};
+  const cfg = {responsive: true, displaylogo: false,
+               modeBarButtonsToRemove: ['sendDataToCloud']};
+
+  function renderChart() {
+    const el = document.getElementById('scenario-chart');
+    if (!el) return;
+    if (typeof Plotly === 'undefined') {
+      // Plotly CDN not ready yet — retry in 80 ms
+      setTimeout(renderChart, 80);
+      return;
+    }
+    Plotly.newPlot('scenario-chart', figData.data, figData.layout, cfg);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderChart);
+  } else {
+    renderChart();
+  }
+})();
+{% endif %}
 </script>
 {% endblock %}

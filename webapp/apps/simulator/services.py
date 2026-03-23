@@ -3,6 +3,7 @@ Bridge between Django and the qual2k package.
 All heavy logic lives here; views stay thin.
 """
 import os
+import re
 import sys
 import io
 import json
@@ -176,6 +177,8 @@ def execute_run(run_pk: int):
             if isinstance(kge_global, float) and (math.isnan(kge_global) or math.isinf(kge_global)):
                 kge_global = None
 
+        generate_plotly_run_charts(run)
+
         run.kge_global = kge_global
         run.kge_by_var_json = kge_by_var
         run.status = 'done'
@@ -243,88 +246,279 @@ def execute_pipeline(pipeline_pk: int):
         pl.save(update_fields=['status', 'error_message'])
 
 
+# ─── Plotly chart generation ─────────────────────────────────────────────────
+
+_COLORES_PLOTLY = [
+    '#0077b6', '#2a9d8f', '#e9c46a', '#f4a261', '#e76f51',
+    '#6c757d', '#264653', '#8ecae6', '#ffb703', '#adb5bd',
+]
+
+_CAL_OBS_PARES = [
+    ('flow',                    'flow_obs'),
+    ('water_temp_c',            'water_temp_c_obs'),
+    ('total_suspended_solids',  'total_suspended_solids_obs'),
+    ('dissolved_oxygen',        'dissolved_oxygen_obs'),
+    ('carbonaceous_bod_fast',   'carbonaceous_bod_fast_obs'),
+    ('total_kjeldahl_nitrogen', 'total_kjeldahl_nitrogen_obs'),
+    ('ammonium',                'ammonium_obs'),
+    ('total_phosphorus',        'total_phosphorus_obs'),
+    ('conductivity',            'conductivity_obs'),
+    ('nitrate',                 'nitrate_obs'),
+    ('inorganic_phosphorus',    'inorganic_phosphorus_obs'),
+    ('pathogen',                'pathogen_obs'),
+    ('pH',                      'pH_obs'),
+    ('alkalinity',              'alkalinity_obs'),
+]
+
+_PLOTLY_LAYOUT_BASE = dict(
+    plot_bgcolor='white',
+    paper_bgcolor='white',
+    height=360,
+    margin=dict(l=60, r=20, t=45, b=55),
+    legend=dict(orientation='h', y=-0.18),
+    xaxis=dict(showgrid=True, gridcolor='#e0e0e0', autorange='reversed'),
+    yaxis=dict(showgrid=True, gridcolor='#e0e0e0'),
+)
+
+
+def _safe_name(col: str) -> str:
+    return re.sub(r'[^a-zA-Z0-9_]', '_', col)
+
+
+def generate_plotly_run_charts(run) -> None:
+    """
+    Genera archivos JSON de Plotly para los resultados del run:
+      - resultados/plotly/         → perfiles longitudinales
+      - resultados/comparacion/plotly/ → simulado vs observado
+    Se llama automáticamente al final de execute_run().
+    """
+    try:
+        import plotly.graph_objects as go
+        from qual2k.analysis.plotter import Q2KPlotter
+    except ImportError:
+        return
+
+    csv_path = run.results_csv_path
+    if not os.path.exists(csv_path):
+        return
+
+    plotter = Q2KPlotter()
+    labels = plotter.labels_espanol
+    x_col = 'Distancia Longitudinal (km)'
+
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception:
+        return
+
+    if x_col not in df.columns:
+        return
+
+    df = df.sort_values(x_col)
+
+    # Directorios de salida
+    plotly_profiles_dir = os.path.join(run.graphs_dir, 'plotly')
+    plotly_comp_dir = os.path.join(run.comparacion_dir, 'plotly')
+    os.makedirs(plotly_profiles_dir, exist_ok=True)
+    os.makedirs(plotly_comp_dir, exist_ok=True)
+
+    # ── Perfiles longitudinales ───────────────────────────────────────────────
+    sim_cols = [c for c in df.columns if c != x_col and not c.endswith('_obs')]
+    for i, col in enumerate(sim_cols):
+        color = _COLORES_PLOTLY[i % len(_COLORES_PLOTLY)]
+        label = labels.get(col, col)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df[x_col], y=df[col],
+            mode='lines', name='Simulado',
+            line=dict(color=color, width=2.5),
+        ))
+        layout = dict(_PLOTLY_LAYOUT_BASE)
+        layout['title'] = dict(text=label, font=dict(size=13, color='#222'))
+        layout['xaxis_title'] = 'Distancia [km]'
+        layout['yaxis_title'] = label
+        fig.update_layout(**layout)
+        with open(os.path.join(plotly_profiles_dir, f'{_safe_name(col)}.json'), 'w') as f:
+            f.write(fig.to_json())
+
+    # ── Simulado vs Observado ─────────────────────────────────────────────────
+    for i, (sim_col, obs_col) in enumerate(_CAL_OBS_PARES):
+        if obs_col not in df.columns or df[obs_col].dropna().empty:
+            continue
+        color = _COLORES_PLOTLY[i % len(_COLORES_PLOTLY)]
+        label = labels.get(sim_col, sim_col)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=df[x_col], y=df[sim_col],
+            mode='lines', name='Simulado',
+            line=dict(color=color, width=2.5),
+        ))
+        fig.add_trace(go.Scatter(
+            x=df[x_col], y=df[obs_col],
+            mode='markers', name='Observado',
+            marker=dict(color='#111', size=8, symbol='circle'),
+        ))
+        layout = dict(_PLOTLY_LAYOUT_BASE)
+        layout['title'] = dict(text=f'Calibración: {label}', font=dict(size=13, color='#222'))
+        layout['xaxis_title'] = 'Distancia [km]'
+        layout['yaxis_title'] = label
+        fig.update_layout(**layout)
+        with open(os.path.join(plotly_comp_dir, f'{_safe_name(sim_col)}.json'), 'w') as f:
+            f.write(fig.to_json())
+
+
+def collect_plotly_charts(run) -> dict:
+    """
+    Lee los JSON de Plotly guardados en disco.
+    Retorna {profiles: [{title, json}, ...], comparacion: [{title, json}, ...]}.
+    Falls back to vacío si no hay archivos (runs antiguos).
+    """
+    from qual2k.analysis.plotter import Q2KPlotter
+    labels = Q2KPlotter().labels_espanol
+
+    def read_dir(abs_dir):
+        if not os.path.isdir(abs_dir):
+            return []
+        result = []
+        for fname in sorted(os.listdir(abs_dir)):
+            if not fname.endswith('.json'):
+                continue
+            var_name = fname[:-5]  # quita .json
+            title = labels.get(var_name, var_name.replace('_', ' ').title())
+            try:
+                with open(os.path.join(abs_dir, fname), encoding='utf-8') as fh:
+                    result.append({'title': title, 'json': fh.read()})
+            except Exception:
+                continue
+        return result
+
+    return {
+        'profiles':    read_dir(os.path.join(run.graphs_dir, 'plotly')),
+        'comparacion': read_dir(os.path.join(run.comparacion_dir, 'plotly')),
+    }
+
+
 # ─── Scenario comparison ─────────────────────────────────────────────────────
 
 def generate_scenario_comparison(runs, variable: str, labels: dict = None,
                                   criterion_value: float = None,
                                   criterion_label: str = None):
     """
-    Generate a longitudinal-profile comparison plot for multiple SimulationRuns.
-    Each run becomes one line. Returns a base64-encoded PNG string, or None on failure.
-
-    Args:
-        runs:             iterable of SimulationRun instances
-        variable:         CSV column name to plot
-        labels:           optional dict {run_pk: custom_label} for legend entries;
-                          defaults to run.name when not provided
-        criterion_value:  optional float — draws a horizontal dashed line at this value
-        criterion_label:  optional str — legend label for the criterion line
+    Genera un gráfico interactivo Plotly comparando múltiples SimulationRuns.
+    Retorna (fig_json: str | None, warnings: list[str]).
     """
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
+    import plotly.graph_objects as go
     from qual2k.analysis.plotter import Q2KPlotter
 
     plotter = Q2KPlotter()
-    colors = plotter.colores_elegantes
+    labels_map = plotter.labels_espanol
     x_col = 'Distancia Longitudinal (km)'
+    label_y = labels_map.get(variable, variable)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig = go.Figure()
     plotted = 0
+    warn_msgs = []
 
     for i, run in enumerate(runs):
+        csv_path = run.results_csv_path
+        if not os.path.exists(csv_path):
+            warn_msgs.append(
+                f'"{run.name}": el archivo de resultados no se encontró en disco. '
+                f'¿El run fue ejecutado correctamente?'
+            )
+            continue
+        try:
+            df = pd.read_csv(csv_path)
+            if x_col not in df.columns:
+                warn_msgs.append(f'"{run.name}": el CSV no contiene la columna de distancia.')
+                continue
+            if variable not in df.columns:
+                warn_msgs.append(f'"{run.name}": la variable "{variable}" no existe en el CSV.')
+                continue
+            df = df.sort_values(x_col)
+            color = _COLORES_PLOTLY[i % len(_COLORES_PLOTLY)]
+            legend_label = (labels or {}).get(run.pk, run.name)
+            fig.add_trace(go.Scatter(
+                x=df[x_col], y=df[variable],
+                mode='lines', name=legend_label,
+                line=dict(color=color, width=2.5),
+                hovertemplate='%{x:.2f} km → %{y:.3f}<extra>' + legend_label + '</extra>',
+            ))
+            plotted += 1
+        except Exception as exc:
+            warn_msgs.append(f'"{run.name}": error inesperado — {exc}')
+            continue
+
+    if plotted == 0:
+        return None, warn_msgs
+
+    # Criterio de calidad opcional
+    if criterion_value is not None:
+        crit_lbl = criterion_label.strip() if criterion_label and criterion_label.strip() \
+                   else f'Criterio ({criterion_value})'
+        fig.add_hline(
+            y=criterion_value,
+            line=dict(color='red', width=1.8, dash='dash'),
+            annotation_text=crit_lbl,
+            annotation_position='top right',
+        )
+
+    fig.update_layout(
+        title=dict(text=f'Comparación de Escenarios: {label_y}', font=dict(size=15)),
+        xaxis=dict(title='Distancia [km]', autorange='reversed',
+                   showgrid=True, gridcolor='#e0e0e0'),
+        yaxis=dict(title=label_y, showgrid=True, gridcolor='#e0e0e0'),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        showlegend=True,
+        legend=dict(orientation='h', y=-0.22, x=0, xanchor='left'),
+        height=480,
+        margin=dict(l=65, r=25, t=55, b=90),
+        hovermode='x unified',
+    )
+
+    return fig.to_json(), warn_msgs
+
+
+def build_scenario_csv(runs, variable: str, labels: dict = None) -> str | None:
+    """
+    Construye un CSV con columnas: distancia_km, <variable>, escenario.
+    Retorna el string CSV, o None si no hay datos.
+    """
+    from qual2k.analysis.plotter import Q2KPlotter
+
+    x_col = 'Distancia Longitudinal (km)'
+    label_y = Q2KPlotter().labels_espanol.get(variable, variable)
+    rows = []
+
+    for run in runs:
         csv_path = run.results_csv_path
         if not os.path.exists(csv_path):
             continue
         try:
             df = pd.read_csv(csv_path)
-            if variable not in df.columns or x_col not in df.columns:
+            if x_col not in df.columns or variable not in df.columns:
                 continue
             df = df.sort_values(x_col)
-            color = colors[i % len(colors)]
-            legend_label = (labels or {}).get(run.pk, run.name)
-            ax.plot(df[x_col], df[variable], color=color,
-                    linewidth=2, label=legend_label)
-            plotted += 1
+            scenario_name = (labels or {}).get(run.pk, run.name)
+            for _, row in df[[x_col, variable]].iterrows():
+                rows.append({
+                    'distancia_km': row[x_col],
+                    label_y: row[variable],
+                    'escenario': scenario_name,
+                })
         except Exception:
             continue
 
-    if plotted == 0:
-        plt.close()
+    if not rows:
         return None
-
-    # Optional quality criterion — horizontal dashed line
-    if criterion_value is not None:
-        crit_lbl = criterion_label.strip() if criterion_label and criterion_label.strip() \
-                   else f'Criterio ({criterion_value})'
-        ax.axhline(y=criterion_value, color='red', linewidth=1.5,
-                   linestyle='--', alpha=0.85, label=crit_lbl, zorder=5)
-
-    label_y = plotter.get_label(variable)
-    ax.set_title(f'Comparación de Escenarios: {label_y}',
-                 fontweight='bold', fontstyle='italic', fontsize=12, pad=15)
-    ax.set_xlabel('Distancia [km]', fontweight='bold', fontsize=10)
-    ax.set_ylabel(label_y, fontsize=10, fontweight='bold')
-    ax.invert_xaxis()
-    ax.minorticks_on()
-    ax.grid(which='major', linestyle='--', color='lightgray', linewidth=0.9, alpha=0.8)
-    ax.grid(which='minor', linestyle=':', color='lightgray', linewidth=0.6, alpha=0.6)
-    ax.tick_params(axis='both', which='major', length=6, width=1.2, direction='inout')
-    ax.tick_params(axis='both', which='minor', length=3, width=0.8, direction='inout')
-    ax.legend(loc='best', framealpha=0.9)
-    plt.tight_layout()
-
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
-    plt.close()
-    buf.seek(0)
-    return 'data:image/png;base64,' + __import__('base64').b64encode(buf.read()).decode('utf-8')
+    return pd.DataFrame(rows).to_csv(index=False)
 
 
 # ─── Graph helpers ────────────────────────────────────────────────────────────
 
 def collect_graphs(run) -> dict:
-    """Returns {profiles: [url, ...], comparacion: [url, ...]}"""
+    """Returns {profiles: [url, ...], comparacion: [url, ...]} — PNGs (legacy)."""
 
     def urls_in(abs_dir):
         if not os.path.isdir(abs_dir):

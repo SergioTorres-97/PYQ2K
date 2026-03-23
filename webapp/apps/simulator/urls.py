@@ -27,6 +27,7 @@ urlpatterns = [
 
     # Scenarios comparison
     path('projects/<int:pk>/scenarios/', views.project_scenarios, name='project_scenarios'),
+    path('projects/<int:pk>/scenarios/csv/', views.scenarios_download_csv, name='scenarios_download_csv'),
 
     # Pipelines
     path('projects/<int:project_pk>/pipelines/new/', views.pipeline_new, name='pipeline_new'),

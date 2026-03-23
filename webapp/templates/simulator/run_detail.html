@@ -225,8 +225,23 @@
   </div>
 </div>
 
-<!-- Longitudinal profiles -->
-{% if graphs.profiles %}
+<!-- Longitudinal profiles (Plotly interactivo) -->
+{% if plotly_charts.profiles %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-graph-up"></i> Perfiles longitudinales</div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% for chart in plotly_charts.profiles %}
+      <div class="col-xl-6">
+        <div class="border rounded p-1" style="background:#fff;">
+          <div id="plt-prof-{{ forloop.counter }}" style="height:340px;"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% elif graphs.profiles %}
 <div class="card mb-4">
   <div class="card-header fw-semibold"><i class="bi bi-graph-up"></i> Perfiles longitudinales</div>
   <div class="card-body">
@@ -235,8 +250,23 @@
 </div>
 {% endif %}
 
-<!-- Cal vs Obs -->
-{% if graphs.comparacion %}
+<!-- Cal vs Obs (Plotly interactivo) -->
+{% if plotly_charts.comparacion %}
+<div class="card mb-4">
+  <div class="card-header fw-semibold"><i class="bi bi-scatter-chart"></i> Simulado vs Observado</div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% for chart in plotly_charts.comparacion %}
+      <div class="col-xl-6">
+        <div class="border rounded p-1" style="background:#fff;">
+          <div id="plt-comp-{{ forloop.counter }}" style="height:340px;"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% elif graphs.comparacion %}
 <div class="card mb-4">
   <div class="card-header fw-semibold"><i class="bi bi-scatter-chart"></i> Simulado vs Observado</div>
   <div class="card-body">
@@ -251,6 +281,34 @@
 
 {% block extra_js %}
 <script src="{% static 'js/poll_status.js' %}"></script>
+
+{% if plotly_charts.profiles or plotly_charts.comparacion %}
+<script>
+(function() {
+  const cfg = {responsive: true, displaylogo: false,
+               modeBarButtonsToRemove: ['sendDataToCloud']};
+
+  // Perfiles longitudinales
+  const profiles = [
+    {% for chart in plotly_charts.profiles %}
+    {id: "plt-prof-{{ forloop.counter }}", fig: {{ chart.json|safe }}}{% if not forloop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  // Simulado vs Observado
+  const comparacion = [
+    {% for chart in plotly_charts.comparacion %}
+    {id: "plt-comp-{{ forloop.counter }}", fig: {{ chart.json|safe }}}{% if not forloop.last %},{% endif %}
+    {% endfor %}
+  ];
+
+  [...profiles, ...comparacion].forEach(function(c) {
+    const el = document.getElementById(c.id);
+    if (el) Plotly.newPlot(c.id, c.fig.data, c.fig.layout, cfg);
+  });
+})();
+</script>
+{% endif %}
 <script>
 function launchRun() {
   const btn = document.getElementById('btn-launch');
