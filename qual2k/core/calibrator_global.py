@@ -17,6 +17,7 @@ import tempfile
 import threading
 import multiprocessing as mp
 import warnings
+from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any, Union
 
 import numpy as np
@@ -336,6 +337,7 @@ class CalibracionGlobal:
         self.ga_instance            = None
         self.mejor_solucion         = None
         self.historial_generaciones = []
+        self.txt_log_path           = None
         self._lock                  = threading.Lock()
 
     # ── Inicialización ────────────────────────────────────────────────────────
@@ -377,6 +379,52 @@ class CalibracionGlobal:
                         self.param_map.append((subsistema, param_name, i))
 
     # ── GA callbacks ──────────────────────────────────────────────────────────
+
+    def _escribir_generacion_txt(self, ga, gen: int, stats: dict) -> None:
+        """Agrega los resultados parciales de una generación al log TXT."""
+        best_idx          = int(np.argmax(ga.last_generation_fitness))
+        best_solution_gen = ga.population[best_idx]
+
+        sep   = '─' * 70
+        sep_s = '─' * 46
+
+        with open(self.txt_log_path, 'a', encoding='utf-8') as f:
+            f.write(f'\n{"=" * 70}\n')
+            f.write(f'  GENERACIÓN {gen}\n')
+            f.write(f'{"=" * 70}\n')
+
+            # ── estadísticas de fitness ──────────────────────────────────────
+            f.write(f'  Mejor generación : {stats["mejor_fitness"]:>10.6f}\n')
+            f.write(f'  Mejor global     : {stats["mejor_global"]:>10.6f}\n')
+            f.write(f'  Promedio         : {stats["promedio"]:>10.6f} ± {stats["std"]:.6f}\n')
+            f.write(f'  Mediana          : {stats["mediana"]:>10.6f}\n')
+            f.write(f'  Min / Max        : {stats["min"]:>10.6f} / {stats["max"]:.6f}\n')
+
+            # ── mejores parámetros de esta generación ────────────────────────
+            f.write(f'\n  Mejores parámetros (generación {gen}):\n')
+            f.write(f'  {sep_s}\n')
+            f.write(f'  {"Subsistema":<12} {"Parámetro":<10} {"Reach":>7}  {"Valor":>12}\n')
+            f.write(f'  {sep_s}\n')
+            for gene_val, (subsistema, param_name, reach_idx) in zip(best_solution_gen, self.param_map):
+                reach_str = str(reach_idx) if reach_idx is not None else 'global'
+                f.write(f'  {subsistema:<12} {param_name:<10} {reach_str:>7}  {gene_val:>12.6f}\n')
+            f.write(f'  {sep_s}\n')
+
+            # ── KGEs del mejor global acumulado ──────────────────────────────
+            if self.mejor_metricas:
+                f.write(f'\n  KGEs por variable (mejor global acumulado):\n')
+                f.write(f'  {sep}\n')
+                f.write(f'  {"Variable":<34} {"KGE":>8}  {"Peso":>6}  {"Contrib":>10}\n')
+                f.write(f'  {sep}\n')
+                kge_total = 0.0
+                for var, kge_var in self.mejor_metricas.items():
+                    peso   = self.pesos_kge.get(var, 0.0)
+                    contrib = kge_var * peso
+                    kge_total += contrib
+                    f.write(f'  {var:<34} {kge_var:>8.4f}  {peso:>6.2f}  {contrib:>10.4f}\n')
+                f.write(f'  {sep}\n')
+                f.write(f'  {"KGE PONDERADO GLOBAL":<34} {kge_total:>8.4f}\n')
+            f.write('\n')
 
     def _fitness_function(self, ga, solution, solution_idx):
         """Corre el pipeline completo y retorna el KGE de Chicamocha como fitness.
@@ -427,6 +475,9 @@ class CalibracionGlobal:
         }
         self.historial_generaciones.append(stats)
 
+        if self.txt_log_path:
+            self._escribir_generacion_txt(ga, gen, stats)
+
         print(f'\n{"=" * 65}')
         print(f'  GENERACIÓN {gen:3d}')
         print(f'  Mejor gen : {stats["mejor_fitness"]:.4f}  |  '
@@ -450,13 +501,34 @@ class CalibracionGlobal:
 
     # ── Ejecución ─────────────────────────────────────────────────────────────
 
-    def ejecutar(self) -> Tuple[np.ndarray, float]:
+    def ejecutar(self, txt_log_path: Optional[str] = None) -> Tuple[np.ndarray, float]:
         """
         Ejecuta la calibración global.
+
+        Args:
+            txt_log_path: Ruta del archivo TXT donde se guardarán los resultados
+                          parciales por generación (parámetros y KGEs). Si es
+                          None no se genera el log.
 
         Returns:
             (mejor_solucion, kge_chicamocha)
         """
+        # ── inicializar log TXT ──────────────────────────────────────────────
+        self.txt_log_path = txt_log_path
+        if txt_log_path:
+            os.makedirs(os.path.dirname(os.path.abspath(txt_log_path)), exist_ok=True)
+            with open(txt_log_path, 'w', encoding='utf-8') as f:
+                f.write('=' * 70 + '\n')
+                f.write('CALIBRACIÓN GLOBAL — Canal Vargas → Tramo 3S → Chicamocha\n')
+                f.write(f'Fecha            : {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
+                f.write(f'Generaciones     : {self.num_generations}\n')
+                f.write(f'Población        : {self.population_size}\n')
+                f.write(f'Padres mating    : {self.num_parents_mating}\n')
+                f.write(f'Mutación         : {self.mutation_type}  p={self.mutation_probability}\n')
+                f.write(f'Stop criteria    : {self.stop_criteria}\n')
+                f.write(f'Semilla          : {self.random_seed}\n')
+                f.write('=' * 70 + '\n')
+
         print('\n' + '=' * 80)
         print('CALIBRACIÓN GLOBAL — Canal Vargas → Tramo 3S → Chicamocha')
         print('Objetivo: maximizar KGE de Chicamocha')

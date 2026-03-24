@@ -132,7 +132,9 @@ def main():
     )
 
     try:
-        solucion, kge = calibrador.ejecutar()
+        solucion, kge = calibrador.ejecutar(
+            txt_log_path=str(base / 'data/resultados_calibracion/log_generaciones.txt')
+        )
 
         calibrador.imprimir_parametros_calibrados()
 
