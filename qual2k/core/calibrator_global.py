@@ -712,6 +712,7 @@ class CalibracionGlobal:
         ax.legend()
         ax.grid(True, alpha=0.3, linestyle='--')
         plt.tight_layout()
+        os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
         plt.savefig(filename, dpi=dpi, bbox_inches='tight', facecolor='white')
         plt.close()
         print(f'✓ Gráfica guardada: {filename}')
