@@ -1,24 +1,36 @@
 """
 chicamocha_sensibilidad.py
 ==========================
-Análisis de sensibilidad para el Río Chicamocha.
+Análisis de sensibilidad LHS / SRCC para el Río Chicamocha.
+
+Cada parámetro solo necesita un rango plausible [minimo, maximo].
+El muestreo LHS garantiza cobertura uniforme del espacio de parámetros
+con un número reducido de corridas.
 
 Parámetros variados
 -------------------
-  Hidráulicos (reaches, todos los tramos):
-    alpha_1, beta_1, alpha_2, beta_2
+  Hidráulicos (pestaña Reaches, todos los tramos):
+    alpha_1  [m/s · (m³/s)^-beta_1]   coef. velocidad
+    beta_1   [-]                        exp. velocidad
+    alpha_2  [m · (m³/s)^-beta_2]      coef. profundidad
+    beta_2   [-]                        exp. profundidad
 
   Calidad de un vertimiento (By-Pass PTAR Río de Oro):
-    dbo5, oxigeno_disuelto, temperatura
+    dbo5             mg/L
+    oxigeno_disuelto mg/L
+    temperatura      °C
 
-  Condición de borde (CABECERA en wq_data):
-    caudal, dbo5, oxigeno_disuelto, temperatura, pH
+  Condición de borde (pestaña WQ_Data, estación CABECERA):
+    caudal           m³/s
+    dbo5             mg/L
+    oxigeno_disuelto mg/L
+    temperatura      °C
+    pH               -
 """
 
 import sys
 from pathlib import Path
 
-# Asegurar que el paquete qual2k sea encontrado
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
@@ -33,72 +45,63 @@ JSON_BASE  = str(_ROOT / "examples" / "chicamocha_simulacion.json")
 OUTPUT_DIR = str(_ROOT / "resultados" / "chicamocha_sensibilidad")
 
 # ===========================================================================
-# Parámetros
+# Parámetros — solo necesitás definir [minimo, maximo]
 # ===========================================================================
 
 parametros = [
 
-    # ── Parámetros hidráulicos — todos los tramos ─────────────────────────
+    # ── Hidráulicos — todos los tramos ───────────────────────────────────
     # tipo="relativo": el valor muestreado multiplica el valor calibrado de
-    # cada tramo, por lo que media=1.0 conserva la media calibrada.
+    # cada tramo individualmente (minimo=0.5 → 50%, maximo=2.0 → 200%).
+    # Así se respeta la calibración y solo se explora la incertidumbre relativa.
 
     ParametroSensibilidad(
-        nombre       = "alpha_1",
-        categoria    = "reach",
-        campo        = "alpha_1",
-        distribucion = "normal",
-        media        = 1.0,    # multiplicador
-        std          = 0.20,   # ±20 %
-        minimo       = 0.1,
-        tipo         = "relativo",
+        nombre    = "alpha_1",
+        categoria = "reach",
+        campo     = "alpha_1",
+        minimo    = 0.5,    # 50 % del valor calibrado
+        maximo    = 2.0,    # 200 % del valor calibrado
+        tipo      = "relativo",
     ),
 
     ParametroSensibilidad(
-        nombre       = "beta_1",
-        categoria    = "reach",
-        campo        = "beta_1",
-        distribucion = "normal",
-        media        = 1.0,
-        std          = 0.15,
-        minimo       = 0.1,
-        tipo         = "relativo",
+        nombre    = "beta_1",
+        categoria = "reach",
+        campo     = "beta_1",
+        minimo    = 0.5,
+        maximo    = 2.0,
+        tipo      = "relativo",
     ),
 
     ParametroSensibilidad(
-        nombre       = "alpha_2",
-        categoria    = "reach",
-        campo        = "alpha_2",
-        distribucion = "normal",
-        media        = 1.0,
-        std          = 0.20,
-        minimo       = 0.1,
-        tipo         = "relativo",
+        nombre    = "alpha_2",
+        categoria = "reach",
+        campo     = "alpha_2",
+        minimo    = 0.5,
+        maximo    = 2.0,
+        tipo      = "relativo",
     ),
 
     ParametroSensibilidad(
-        nombre       = "beta_2",
-        categoria    = "reach",
-        campo        = "beta_2",
-        distribucion = "normal",
-        media        = 1.0,
-        std          = 0.15,
-        minimo       = 0.1,
-        tipo         = "relativo",
+        nombre    = "beta_2",
+        categoria = "reach",
+        campo     = "beta_2",
+        minimo    = 0.5,
+        maximo    = 2.0,
+        tipo      = "relativo",
     ),
 
-    # ── Calidad del vertimiento By-Pass PTAR Río de Oro ──────────────────
-    # Ajustar nombre_fuente al nombre exacto que aparece en el JSON base.
-    # tipo="absoluto": el valor muestreado reemplaza directamente.
+    # ── Vertimiento: By-Pass PTAR Río de Oro ─────────────────────────────
+    # Verificar que el nombre coincida exactamente con el JSON base.
+    # tipo="absoluto": el valor muestreado reemplaza al del JSON.
 
     ParametroSensibilidad(
         nombre        = "dbo5_bypass",
         categoria     = "fuente",
         campo         = "dbo5",
         nombre_fuente = "By-Pass PTAR Rio de Oro",
-        distribucion  = "lognormal",
-        media         = 150.0,   # mg/L
-        std           = 0.50,    # sigma de ln(X)
-        minimo        = 5.0,
+        minimo        = 50.0,    # mg/L
+        maximo        = 400.0,
         tipo          = "absoluto",
     ),
 
@@ -107,10 +110,8 @@ parametros = [
         categoria     = "fuente",
         campo         = "oxigeno_disuelto",
         nombre_fuente = "By-Pass PTAR Rio de Oro",
-        distribucion  = "uniform",
-        minimo        = 0.5,
-        maximo        = 4.0,
-        media         = 2.0,
+        minimo        = 0.5,     # mg/L
+        maximo        = 5.0,
         tipo          = "absoluto",
     ),
 
@@ -119,27 +120,20 @@ parametros = [
         categoria     = "fuente",
         campo         = "temperatura",
         nombre_fuente = "By-Pass PTAR Rio de Oro",
-        distribucion  = "normal",
-        media         = 22.0,   # °C
-        std           = 2.5,
-        minimo        = 10.0,
-        maximo        = 35.0,
+        minimo        = 15.0,    # °C
+        maximo        = 30.0,
         tipo          = "absoluto",
     ),
 
     # ── Condición de borde — CABECERA ────────────────────────────────────
-    # nombre_estacion debe coincidir con el campo "nombre_estacion"
-    # de la primera entrada en wq_data del JSON.
 
     ParametroSensibilidad(
         nombre          = "caudal_cabecera",
         categoria       = "cabecera",
         campo           = "caudal",
         nombre_estacion = "CABECERA",
-        distribucion    = "lognormal",
-        media           = 1.5,    # m³/s
-        std             = 0.35,   # sigma de ln(Q)
-        minimo          = 0.1,
+        minimo          = 0.5,    # m³/s
+        maximo          = 5.0,
         tipo            = "absoluto",
     ),
 
@@ -148,10 +142,8 @@ parametros = [
         categoria       = "cabecera",
         campo           = "dbo5",
         nombre_estacion = "CABECERA",
-        distribucion    = "normal",
-        media           = 3.0,    # mg/L
-        std             = 1.0,
-        minimo          = 0.5,
+        minimo          = 1.0,    # mg/L
+        maximo          = 10.0,
         tipo            = "absoluto",
     ),
 
@@ -160,11 +152,8 @@ parametros = [
         categoria       = "cabecera",
         campo           = "oxigeno_disuelto",
         nombre_estacion = "CABECERA",
-        distribucion    = "normal",
-        media           = 7.5,    # mg/L
-        std             = 1.0,
-        minimo          = 2.0,
-        maximo          = 12.0,
+        minimo          = 4.0,    # mg/L
+        maximo          = 10.0,
         tipo            = "absoluto",
     ),
 
@@ -173,11 +162,8 @@ parametros = [
         categoria       = "cabecera",
         campo           = "temperatura",
         nombre_estacion = "CABECERA",
-        distribucion    = "normal",
-        media           = 14.0,   # °C
-        std             = 2.0,
-        minimo          = 8.0,
-        maximo          = 22.0,
+        minimo          = 8.0,    # °C
+        maximo          = 20.0,
         tipo            = "absoluto",
     ),
 
@@ -186,10 +172,8 @@ parametros = [
         categoria       = "cabecera",
         campo           = "pH",
         nombre_estacion = "CABECERA",
-        distribucion    = "uniform",
         minimo          = 6.5,
         maximo          = 8.5,
-        media           = 7.5,
         tipo            = "absoluto",
     ),
 ]
@@ -204,7 +188,7 @@ if __name__ == "__main__":
     df_srcc = analisis_sensibilidad(
         json_base    = JSON_BASE,
         parametros   = parametros,
-        n            = 50,        # aumentar a 200+ para resultados robustos
+        n            = 100,        # con LHS, 100 corridas suele ser suficiente
         output_dir   = OUTPUT_DIR,
         seed         = 42,
         n_workers    = 4,
@@ -218,6 +202,6 @@ if __name__ == "__main__":
         ranking = df_srcc.abs().mean(axis=1).sort_values(ascending=False)
         print(ranking.to_string())
         print()
-        print("Tabla completa SRCC:")
+        print("Tabla completa SRCC  (+directa / -inversa):")
         pd.set_option("display.float_format", "{:+.3f}".format)
         print(df_srcc.to_string())

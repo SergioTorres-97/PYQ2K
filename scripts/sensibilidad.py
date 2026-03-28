@@ -1,12 +1,25 @@
 """
-sensibilidad.py  –  Análisis de sensibilidad Monte Carlo / SRCC para QUAL2K
-===========================================================================
+sensibilidad.py  –  Análisis de sensibilidad LHS / SRCC para QUAL2K
+====================================================================
 
-Muestrea N combinaciones de parámetros, corre QUAL2K en paralelo y calcula
-el SRCC (Spearman Rank Correlation Coefficient) entre cada parámetro y la
-media espacial de cada variable simulada.
+Muestrea N combinaciones de parámetros usando Latin Hypercube Sampling (LHS),
+corre QUAL2K en paralelo y calcula el SRCC (Spearman Rank Correlation
+Coefficient) entre cada parámetro y la media espacial de cada variable simulada.
 
-No requiere datos observados: trabaja únicamente con los perfiles simulados.
+¿Por qué LHS?
+-------------
+Con Monte Carlo puro los valores se agrupan aleatoriamente, dejando zonas del
+espacio de parámetros sin cubrir. LHS divide el rango de cada parámetro en N
+intervalos equiprobables y toma exactamente una muestra por intervalo, rotando
+aleatoriamente entre parámetros. El resultado:
+  - Cobertura uniforme garantizada con N mucho menor que Monte Carlo puro.
+  - SRCC más estable con 50–100 corridas en vez de 200–500.
+
+Distribución asumida: uniforme [minimo, maximo]
+-----------------------------------------------
+Cuando no se conoce la distribución real de un parámetro, la distribución
+uniforme es la hipótesis más honesta: solo se asume que el parámetro está
+dentro de un rango plausible, sin dar más peso a ningún valor interior.
 
 Parámetros soportados
 ---------------------
@@ -22,32 +35,29 @@ Uso básico
 
     parametros = [
         ParametroSensibilidad(
-            nombre       = "alpha_1_global",
-            categoria    = "reach",
-            campo        = "alpha_1",
-            distribucion = "normal",
-            media        = 0.30,
-            std          = 0.06,
-            tipo         = "relativo",   # multiplica el valor base de cada tramo
+            nombre    = "alpha_1",
+            categoria = "reach",
+            campo     = "alpha_1",
+            minimo    = 0.10,
+            maximo    = 0.80,
+            tipo      = "absoluto",
         ),
         ParametroSensibilidad(
-            nombre        = "dbo5_veolia",
+            nombre        = "dbo5_bypass",
             categoria     = "fuente",
             campo         = "dbo5",
-            nombre_fuente = "VEOLIA",
-            distribucion  = "lognormal",
-            media         = 200.0,
-            std           = 0.40,
-            tipo          = "absoluto",  # reemplaza el valor base
+            nombre_fuente = "By-Pass PTAR Rio de Oro",
+            minimo        = 50.0,
+            maximo        = 400.0,
+            tipo          = "absoluto",
         ),
         ParametroSensibilidad(
             nombre          = "caudal_cabecera",
             categoria       = "cabecera",
             campo           = "caudal",
             nombre_estacion = "CABECERA",
-            distribucion    = "normal",
-            media           = 1.5,
-            std             = 0.30,
+            minimo          = 0.5,
+            maximo          = 5.0,
             tipo            = "absoluto",
         ),
     ]
@@ -75,11 +85,12 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import matplotlib
-matplotlib.use("Agg")          # backend sin pantalla (obligatorio antes de importar pyplot)
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr, linregress
+from scipy.stats.qmc import LatinHypercube
 
 # ---------------------------------------------------------------------------
 # Rutas
@@ -119,40 +130,37 @@ class ParametroSensibilidad:
     """
     Define un parámetro a perturbar en el análisis de sensibilidad.
 
+    El muestreo es uniforme en [minimo, maximo] con LHS.
+    Solo necesitás indicar el rango plausible del parámetro.
+
     Atributos comunes
     -----------------
-    nombre        : Identificador único (columna en la tabla de resultados).
-    categoria     : "reach" | "fuente" | "cabecera"
-    campo         : Nombre del campo JSON a modificar.
-    distribucion  : "normal" | "uniform" | "lognormal"
-    media         : Valor central de la distribución.
-                      · normal/uniform : media aritmética.
-                      · lognormal      : mediana (= e^mu).
-    std           : Desviación estándar.
-                      · normal    : std aritmética.
-                      · lognormal : sigma de ln(X) (dispersión relativa).
-                      · uniform   : no se usa (definir minimo/maximo).
-    minimo        : Límite inferior para muestreo y clip.
-    maximo        : Límite superior para muestreo y clip.
-    tipo          : "absoluto" → el valor muestreado REEMPLAZA al valor base.
-                    "relativo" → el valor muestreado MULTIPLICA al valor base
-                                 (media=1.0 ≡ sin cambio en la media).
+    nombre          : Identificador único (columna en la tabla de resultados).
+    categoria       : "reach" | "fuente" | "cabecera"
+    campo           : Campo JSON a modificar.
+                        reach    → "alpha_1", "beta_1", "alpha_2", "beta_2"
+                        fuente   → "dbo5", "oxigeno_disuelto", "temperatura",
+                                   "pH", "caudal"
+                        cabecera → "caudal", "dbo5", "oxigeno_disuelto",
+                                   "temperatura", "pH"
+    minimo          : Límite inferior del rango uniforme.
+    maximo          : Límite superior del rango uniforme.
+    tipo            : "absoluto" → el valor muestreado REEMPLAZA al base.
+                      "relativo" → el valor muestreado MULTIPLICA al base.
+                                   (minimo=0.5, maximo=1.5 → ±50% del calibrado)
 
     Atributos por categoría
     -----------------------
-    nombre_fuente   : (fuente)   nombre del vertimiento en el JSON.
+    nombre_fuente   : (fuente)   nombre exacto del vertimiento en el JSON.
     tramos          : (reach)    índices de tramos a modificar — None = todos.
     nombre_estacion : (cabecera) nombre de la estación en wq_data — None = primera.
     """
-    nombre:       str
-    categoria:    str
-    campo:        str
-    distribucion: str
-    media:        float
-    std:          float           = 0.0
-    minimo:       Optional[float] = None
-    maximo:       Optional[float] = None
-    tipo:         str             = "relativo"
+    nombre:    str
+    categoria: str
+    campo:     str
+    minimo:    float
+    maximo:    float
+    tipo:      str            = "absoluto"
     # Por categoría
     nombre_fuente:   Optional[str]       = None
     tramos:          Optional[List[int]] = None
@@ -160,6 +168,11 @@ class ParametroSensibilidad:
 
     def validar(self):
         """Lanza ValueError si la configuración es inconsistente."""
+        if self.minimo >= self.maximo:
+            raise ValueError(
+                f"[{self.nombre}] minimo ({self.minimo}) debe ser menor que "
+                f"maximo ({self.maximo})."
+            )
         if self.categoria == "reach" and self.campo not in _CAMPOS_REACH:
             raise ValueError(
                 f"[{self.nombre}] campo='{self.campo}' no válido para 'reach'. "
@@ -173,7 +186,8 @@ class ParametroSensibilidad:
                 )
             if self.nombre_fuente is None:
                 raise ValueError(
-                    f"[{self.nombre}] Se requiere 'nombre_fuente' para categoria='fuente'."
+                    f"[{self.nombre}] Se requiere 'nombre_fuente' para "
+                    f"categoria='fuente'."
                 )
         if self.categoria == "cabecera" and self.campo not in _CAMPOS_CABECERA:
             raise ValueError(
@@ -185,40 +199,37 @@ class ParametroSensibilidad:
                 f"[{self.nombre}] categoria='{self.categoria}' no reconocida. "
                 f"Usar 'reach', 'fuente' o 'cabecera'."
             )
-        if self.distribucion not in {"normal", "uniform", "lognormal"}:
-            raise ValueError(
-                f"[{self.nombre}] distribucion='{self.distribucion}' no reconocida. "
-                f"Usar 'normal', 'uniform' o 'lognormal'."
-            )
         if self.tipo not in {"absoluto", "relativo"}:
             raise ValueError(
-                f"[{self.nombre}] tipo='{self.tipo}' no reconocido. Usar 'absoluto' o 'relativo'."
+                f"[{self.nombre}] tipo='{self.tipo}' no reconocido. "
+                f"Usar 'absoluto' o 'relativo'."
             )
 
 
 # ===========================================================================
-# Muestreo
+# LHS — muestreo
 # ===========================================================================
 
-def _muestrear(param: ParametroSensibilidad, rng: np.random.Generator) -> float:
-    """Devuelve un valor aleatorio según la distribución del parámetro."""
-    if param.distribucion == "normal":
-        v = rng.normal(param.media, param.std)
-    elif param.distribucion == "uniform":
-        lo = param.minimo if param.minimo is not None else param.media - 3 * param.std
-        hi = param.maximo if param.maximo is not None else param.media + 3 * param.std
-        v = rng.uniform(lo, hi)
-    elif param.distribucion == "lognormal":
-        v = rng.lognormal(np.log(param.media), param.std)
-    else:
-        raise ValueError(f"Distribución no reconocida: {param.distribucion!r}")
+def _muestrear_lhs(
+    parametros: List[ParametroSensibilidad],
+    n:          int,
+    seed:       int,
+) -> Dict[str, np.ndarray]:
+    """
+    Genera N muestras con Latin Hypercube Sampling para todos los parámetros.
 
-    # Clip opcional
-    if param.minimo is not None:
-        v = max(v, param.minimo)
-    if param.maximo is not None:
-        v = min(v, param.maximo)
-    return float(v)
+    Retorna un dict {nombre_param: array de N valores escalados a [min, max]}.
+    """
+    d = len(parametros)
+    sampler   = LatinHypercube(d=d, seed=seed)
+    lhs_unit  = sampler.random(n=n)          # shape (n, d) — valores en [0, 1]
+
+    muestras: Dict[str, np.ndarray] = {}
+    for j, p in enumerate(parametros):
+        # Escalar de [0, 1] a [minimo, maximo]
+        muestras[p.nombre] = p.minimo + lhs_unit[:, j] * (p.maximo - p.minimo)
+
+    return muestras
 
 
 # ===========================================================================
@@ -226,62 +237,45 @@ def _muestrear(param: ParametroSensibilidad, rng: np.random.Generator) -> float:
 # ===========================================================================
 
 def _aplicar_valor(base: float, valor: float, tipo: str) -> float:
-    """Combina el valor base con el valor muestreado."""
     if tipo == "relativo":
         return base * valor
     return valor   # absoluto
 
 
 def _mod_reach(config: dict, param: ParametroSensibilidad, valor: float):
-    """
-    Modifica un parámetro hidráulico (alpha_1, beta_1, alpha_2, beta_2)
-    en los tramos indicados (o en todos si param.tramos es None).
-    """
     reaches = config.get("reaches", [])
     if not reaches:
         raise ValueError("El JSON no tiene la sección 'reaches'.")
-
     indices = param.tramos if param.tramos is not None else list(range(len(reaches)))
     for i in indices:
         if i >= len(reaches):
             raise IndexError(
-                f"[{param.nombre}] Índice de tramo {i} fuera de rango (total={len(reaches)})."
+                f"[{param.nombre}] Índice de tramo {i} fuera de rango "
+                f"(total={len(reaches)})."
             )
         base = float(reaches[i].get(param.campo, 1.0) or 1.0)
         reaches[i][param.campo] = _aplicar_valor(base, valor, param.tipo)
 
 
 def _mod_fuente(config: dict, param: ParametroSensibilidad, valor: float):
-    """
-    Modifica un campo de calidad (dbo5, oxigeno_disuelto, temperatura, pH, caudal)
-    en el vertimiento identificado por param.nombre_fuente.
-    """
-    sources = config.get("sources", [])
+    sources    = config.get("sources", [])
     encontrado = False
     for src in sources:
         if src.get("nombre") == param.nombre_fuente:
             base = float(src.get(param.campo, 0.0) or 0.0)
             src[param.campo] = _aplicar_valor(base, valor, param.tipo)
             encontrado = True
-
     if not encontrado:
         raise ValueError(
             f"[{param.nombre}] No se encontró la fuente '{param.nombre_fuente}' "
-            f"en la sección 'sources' del JSON."
+            f"en 'sources'."
         )
 
 
 def _mod_cabecera(config: dict, param: ParametroSensibilidad, valor: float):
-    """
-    Modifica caudal o calidad de agua en la estación de cabecera de wq_data.
-    Si param.nombre_estacion está definido, busca esa estación por nombre;
-    de lo contrario usa la primera entrada de wq_data.
-    Si el campo modificado es 'caudal', también actualiza simulacion.q_cabecera.
-    """
     wq_data = config.get("wq_data", [])
     if not wq_data:
         raise ValueError("El JSON no tiene la sección 'wq_data'.")
-
     if param.nombre_estacion:
         estacion = next(
             (s for s in wq_data if s.get("nombre_estacion") == param.nombre_estacion),
@@ -295,17 +289,15 @@ def _mod_cabecera(config: dict, param: ParametroSensibilidad, valor: float):
     else:
         estacion = wq_data[0]
 
-    base = float(estacion.get(param.campo, 0.0) or 0.0)
-    nuevo = _aplicar_valor(base, valor, param.tipo)
+    base   = float(estacion.get(param.campo, 0.0) or 0.0)
+    nuevo  = _aplicar_valor(base, valor, param.tipo)
     estacion[param.campo] = nuevo
 
-    # Mantener q_cabecera sincronizado si se modifica el caudal
     if param.campo == "caudal":
         config.setdefault("simulacion", {})["q_cabecera"] = nuevo
 
 
 def _modificar_config(config: dict, param: ParametroSensibilidad, valor: float):
-    """Despacha la modificación al modificador correcto según la categoría."""
     if param.categoria == "reach":
         _mod_reach(config, param, valor)
     elif param.categoria == "fuente":
@@ -320,14 +312,13 @@ def _modificar_config(config: dict, param: ParametroSensibilidad, valor: float):
 
 def _worker_corrida(args: tuple):
     """
-    Ejecuta una corrida de QUAL2K con una configuración pre-modificada.
+    Ejecuta una corrida de QUAL2K con la configuración pre-modificada.
 
     Recibe  : (run_id, config_dict, run_dir)
-    Retorna : dict con run_id, exito, medias espaciales de variables de salida.
+    Retorna : dict con run_id, exito y medias espaciales de variables de salida.
     """
     run_id, config_dict, run_dir = args
 
-    # Forzar backend sin pantalla en el proceso hijo
     import matplotlib
     matplotlib.use("Agg")
     import warnings
@@ -336,15 +327,12 @@ def _worker_corrida(args: tuple):
     try:
         os.makedirs(run_dir, exist_ok=True)
 
-        # Redirigir filedir al directorio de esta corrida
         config_dict["header"]["filedir"] = run_dir
 
-        # Guardar el JSON modificado
         json_path = os.path.join(run_dir, "config.json")
         with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(config_dict, fh, indent=2, ensure_ascii=False)
 
-        # Importar aquí para no contaminar el namespace del proceso padre
         from scripts.run_from_json import run_simulacion
 
         data_exp = run_simulacion(
@@ -391,13 +379,13 @@ def analisis_sensibilidad(
     limpiar_runs: bool = True,
 ) -> pd.DataFrame:
     """
-    Ejecuta N corridas Monte Carlo de QUAL2K y calcula el SRCC de sensibilidad.
+    Ejecuta N corridas LHS de QUAL2K y calcula el SRCC de sensibilidad.
 
     Parámetros
     ----------
-    json_base    : Ruta al JSON de simulación base (punto de partida).
-    parametros   : Lista de ParametroSensibilidad a variar.
-    n            : Número de corridas.
+    json_base    : Ruta al JSON de simulación base.
+    parametros   : Lista de ParametroSensibilidad (solo necesitan minimo/maximo).
+    n            : Número de corridas (con LHS, 50–100 suele ser suficiente).
     output_dir   : Directorio de salida para resultados y gráficas.
     seed         : Semilla aleatoria para reproducibilidad.
     n_workers    : Número de procesos en paralelo.
@@ -414,26 +402,24 @@ def analisis_sensibilidad(
     print("Validando parámetros...")
     for p in parametros:
         p.validar()
-    print(f"  OK — {len(parametros)} parámetros, {n} corridas, {n_workers} worker(s).\n")
+    print(f"  OK — {len(parametros)} parámetros, {n} corridas LHS, "
+          f"{n_workers} worker(s).\n")
 
-    # ── Cargar JSON base ──────────────────────────────────────────────────
+    # ── Cargar JSON base ─────────────────────────────────────────────────
     with open(json_base, encoding="utf-8") as fh:
         config_base = json.load(fh)
 
-    # ── Muestreo ──────────────────────────────────────────────────────────
-    rng = np.random.default_rng(seed)
-    muestras: Dict[str, np.ndarray] = {
-        p.nombre: np.array([_muestrear(p, rng) for _ in range(n)])
-        for p in parametros
-    }
+    # ── LHS ──────────────────────────────────────────────────────────────
+    muestras = _muestrear_lhs(parametros, n, seed)
 
-    print("Distribuciones muestreadas:")
+    print("Rangos muestreados (LHS uniforme):")
     for p in parametros:
         v = muestras[p.nombre]
-        print(f"  {p.nombre:<35}  min={v.min():.4g}  media={v.mean():.4g}  max={v.max():.4g}")
+        print(f"  {p.nombre:<35}  [{p.minimo:.4g}, {p.maximo:.4g}]  "
+              f"media_obs={v.mean():.4g}")
     print()
 
-    _graficar_distribuciones(parametros, muestras, output_dir)
+    _graficar_lhs(parametros, muestras, output_dir)
 
     # ── Preparar argumentos por corrida ──────────────────────────────────
     args_list = []
@@ -456,7 +442,7 @@ def analisis_sensibilidad(
             try:
                 res = fut.get(timeout=600)
                 resultados_raw.append(res)
-                estado = "✓" if res["exito"] else "✗"
+                estado  = "✓" if res["exito"] else "✗"
                 detalle = f"  [{res.get('error', '')}]" if not res["exito"] else ""
                 print(f"  {estado} Corrida {i:03d}{detalle}")
             except mp.TimeoutError:
@@ -477,7 +463,7 @@ def analisis_sensibilidad(
     for res in resultados_raw:
         if not res["exito"]:
             continue
-        i = res["run_id"]
+        i    = res["run_id"]
         fila = {"run_id": i}
         for p in parametros:
             fila[p.nombre] = float(muestras[p.nombre][i])
@@ -510,19 +496,18 @@ def _calcular_srcc(
     output_dir:     str,
 ) -> pd.DataFrame:
     """
-    Calcula el SRCC entre cada parámetro y la media espacial de cada variable simulada.
+    Calcula el SRCC entre cada parámetro y la media espacial de cada variable.
 
-    Interpretación:
-      |SRCC| ≈ 1  → parámetro dominante para esa variable
-      |SRCC| ≈ 0  → parámetro sin influencia
-      SRCC  > 0   → relación directa  (↑ parámetro → ↑ variable)
-      SRCC  < 0   → relación inversa  (↑ parámetro → ↓ variable)
+    |SRCC| ≈ 1  → el parámetro domina esa variable
+    |SRCC| ≈ 0  → el parámetro no influye
+    SRCC  > 0   → relación directa  (↑ parámetro → ↑ variable)
+    SRCC  < 0   → relación inversa  (↑ parámetro → ↓ variable)
     """
     cols_sal = [c for c in _VARIABLES_SALIDA if c in df.columns]
     params   = [p for p in nombres_params    if p in df.columns]
 
     if not params or not cols_sal:
-        print("[SRCC] No hay datos suficientes para calcular índices.")
+        print("[SRCC] No hay datos suficientes.")
         return pd.DataFrame()
 
     registros = []
@@ -555,52 +540,86 @@ def _calcular_srcc(
 # Gráficas
 # ===========================================================================
 
-def _graficar_distribuciones(
+def _graficar_lhs(
     parametros: List[ParametroSensibilidad],
     muestras:   Dict[str, np.ndarray],
     output_dir: str,
 ):
-    """Histograma de las distribuciones muestreadas para cada parámetro."""
-    n = len(parametros)
-    if n == 0:
+    """
+    Visualiza la cobertura del LHS:
+      - Izquierda: histograma de cada parámetro (debe ser uniforme).
+      - Derecha:   scatter matrix de los primeros 4 parámetros para verificar
+                   que no hay correlación entre ellos (independencia).
+    """
+    n_params = len(parametros)
+    if n_params == 0:
         return
-    ncols = min(3, n)
-    nrows = (n + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows), squeeze=False)
+
+    # ── Histogramas ───────────────────────────────────────────────────────
+    ncols = min(3, n_params)
+    nrows = (n_params + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
 
     for k, p in enumerate(parametros):
         ax   = axes[k // ncols][k % ncols]
         vals = muestras[p.nombre]
         ax.hist(vals, bins=max(8, len(vals) // 5), color="steelblue",
-                edgecolor="white", alpha=0.8, density=True)
-        ax.axvline(vals.mean(), color="orange", lw=1.5, ls="--",
-                   label=f"μ = {vals.mean():.4g}")
+                edgecolor="white", alpha=0.85, density=False)
+        ax.axvline(vals.min(), color="gray",   lw=1, ls="--", label=f"min={p.minimo:.4g}")
+        ax.axvline(vals.max(), color="gray",   lw=1, ls="--", label=f"max={p.maximo:.4g}")
+        ax.axvline(vals.mean(), color="orange", lw=1.5, ls="-", label=f"μ={vals.mean():.4g}")
         ax.set_title(p.nombre, fontsize=9)
-        ax.set_xlabel("Valor muestreado", fontsize=8)
-        ax.legend(fontsize=7)
+        ax.set_xlabel("Valor", fontsize=8)
+        ax.set_ylabel("Frecuencia", fontsize=8)
+        ax.legend(fontsize=6)
 
-    # Ocultar subplots sobrantes
-    for k in range(n, nrows * ncols):
+    for k in range(n_params, nrows * ncols):
         axes[k // ncols][k % ncols].set_visible(False)
 
-    fig.suptitle("Distribuciones muestreadas (Monte Carlo)", fontsize=11, y=1.01)
+    fig.suptitle("Cobertura LHS — distribución uniforme por parámetro", fontsize=11, y=1.01)
     fig.tight_layout()
-    path = os.path.join(output_dir, "distribuciones_parametros.png")
+    path = os.path.join(output_dir, "lhs_histogramas.png")
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Gráfica distribuciones: {path}")
+    print(f"  Histogramas LHS: {path}")
+
+    # ── Scatter matrix (máximo 5 parámetros para legibilidad) ─────────────
+    params_scatter = parametros[:5]
+    m = len(params_scatter)
+    if m >= 2:
+        fig2, axes2 = plt.subplots(m, m, figsize=(2.5 * m, 2.5 * m))
+        for r in range(m):
+            for c in range(m):
+                ax = axes2[r][c]
+                xv = muestras[params_scatter[c].nombre]
+                yv = muestras[params_scatter[r].nombre]
+                if r == c:
+                    ax.hist(xv, bins=10, color="steelblue", edgecolor="white", alpha=0.8)
+                else:
+                    ax.scatter(xv, yv, s=6, alpha=0.5, color="steelblue")
+                if c == 0:
+                    ax.set_ylabel(params_scatter[r].nombre, fontsize=6)
+                if r == m - 1:
+                    ax.set_xlabel(params_scatter[c].nombre, fontsize=6)
+                ax.tick_params(labelsize=5)
+
+        fig2.suptitle("Independencia entre parámetros (LHS)", fontsize=10, y=1.01)
+        fig2.tight_layout()
+        path2 = os.path.join(output_dir, "lhs_scatter_matrix.png")
+        fig2.savefig(path2, dpi=150, bbox_inches="tight")
+        plt.close(fig2)
+        print(f"  Scatter matrix LHS: {path2}")
 
 
 def _graficar_dispersiones(
-    df:        pd.DataFrame,
-    params:    List[str],
-    etiquetas: Dict[str, str],
+    df:         pd.DataFrame,
+    params:     List[str],
+    etiquetas:  Dict[str, str],
     output_dir: str,
 ):
     """
-    Scatter plots: valor del parámetro (eje X) vs media espacial de la variable
-    simulada (eje Y). Una figura por parámetro, subplots por variable de salida.
-    Incluye recta de tendencia lineal y SRCC anotado.
+    Scatter: valor del parámetro (eje X) vs media espacial de la variable
+    simulada (eje Y). Una figura por parámetro, subplots por variable.
     """
     cols_sal = [c for c in etiquetas if c in df.columns]
     if not cols_sal:
@@ -611,8 +630,8 @@ def _graficar_dispersiones(
     for param in params:
         if param not in df.columns:
             continue
-        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3.5 * nrows), squeeze=False)
-
+        fig, axes = plt.subplots(nrows, ncols,
+                                 figsize=(5 * ncols, 3.5 * nrows), squeeze=False)
         for j, col in enumerate(cols_sal):
             ax    = axes[j // ncols][j % ncols]
             datos = df[[param, col]].dropna()
@@ -649,15 +668,11 @@ def _graficar_dispersiones(
 
 
 def _graficar_tornado(
-    df_srcc:   pd.DataFrame,
-    etiquetas: Dict[str, str],
+    df_srcc:    pd.DataFrame,
+    etiquetas:  Dict[str, str],
     output_dir: str,
 ):
-    """
-    Tornado plot por variable de salida.
-    Barras horizontales, parámetros ordenados de mayor a menor |SRCC|.
-    Azul = relación directa, rojo = relación inversa.
-    """
+    """Tornado plot por variable. Barras ordenadas por |SRCC| descendente."""
     cols_sal = [c for c in etiquetas if c in df_srcc.columns]
 
     for col in cols_sal:
@@ -682,16 +697,15 @@ def _graficar_tornado(
 
 
 def _graficar_heatmap(
-    df_srcc:   pd.DataFrame,
-    etiquetas: Dict[str, str],
+    df_srcc:    pd.DataFrame,
+    etiquetas:  Dict[str, str],
     output_dir: str,
 ):
-    """Heatmap parámetros × variables de salida con valores SRCC anotados."""
+    """Heatmap parámetros × variables con SRCC anotados."""
     cols_sal = [c for c in etiquetas if c in df_srcc.columns]
     if not cols_sal:
         return
 
-    # Ordenar parámetros por sensibilidad media descendente
     df_plot = df_srcc[cols_sal].copy()
     orden   = df_plot.abs().mean(axis=1).sort_values(ascending=False).index
     df_plot = df_plot.loc[orden]
@@ -709,7 +723,7 @@ def _graficar_heatmap(
     ax.set_yticks(range(len(df_plot)))
     ax.set_yticklabels(df_plot.index, fontsize=8)
     ax.set_title(
-        "Índices de sensibilidad (SRCC)\nazul = relación directa · rojo = relación inversa",
+        "Índices de sensibilidad (SRCC)\nazul = directa · rojo = inversa",
         fontsize=9,
     )
 
