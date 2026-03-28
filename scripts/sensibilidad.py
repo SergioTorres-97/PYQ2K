@@ -354,15 +354,23 @@ def _worker_corrida(args: tuple):
 
 
 def _limpiar_run(run_dir: str):
-    """Elimina archivos pesados de una corrida; conserva config.json."""
-    extensiones   = {".q2k", ".out", ".err", ".log", ".DAT"}
-    nombres_extra = {"q2kfortran2_12.exe"}
-    for entry in Path(run_dir).iterdir():
-        if entry.suffix in extensiones or entry.name in nombres_extra:
-            try:
-                entry.unlink()
-            except Exception:
-                pass
+    """
+    Limpia el directorio de una corrida tras extraer sus resultados.
+    Conserva únicamente config.json (útil para debugging).
+    Elimina todo lo demás: ejecutable, archivos FORTRAN y subdirectorios.
+    """
+    import shutil
+    run_path = Path(run_dir)
+    if not run_path.exists():
+        return
+    for entry in run_path.iterdir():
+        try:
+            if entry.is_dir():
+                shutil.rmtree(entry)   # ej. resultados/
+            elif entry.name != "config.json":
+                entry.unlink()         # .q2k, .out, .DAT, .exe, etc.
+        except Exception:
+            pass
 
 
 # ===========================================================================
