@@ -2,34 +2,26 @@
 chicamocha_t1_sensibilidad.py
 ==============================
 Análisis de sensibilidad LHS / SRCC para el Río Chicamocha — Tramo T1
-(CABECERA → LA REFORMA)
+(CABECERA -> LA REFORMA)
 
 Modelo base: D:/Proyecto_UB_2025/PYQ2K/data/templates/Chicamocha_T1/PlantillaBaseQ2K.xlsx
 JSON base  : examples/chicamocha_t1_simulacion.json
 
-Parámetros variados (13 en total)
+Parámetros variados (26 en total)
 -----------------------------------
-  Hidráulicos (1 tramo, tipo="absoluto"):
-    alpha_1   coef. velocidad       calibrado = 0.0958
-    beta_1    exp.  velocidad       calibrado = 0.7558
-    alpha_2   coef. profundidad     calibrado = 1.1037
-    beta_2    exp.  profundidad     calibrado = 0.1403
+  Hidráulicos (1 tramo):
+    alpha_1, beta_1, alpha_2, beta_2
 
-  Vertimiento BY-PASS-VEOLIA (mayor carga DBO = 263 mg/L × 0.27 m³/s):
-    dbo5             calibrado = 263.0  mg/L
-    oxigeno_disuelto calibrado =   3.34 mg/L
-    temperatura      calibrado =  20.85 °C
-
-  Vertimiento VEOLIA (segundo en carga DBO = 32.75 mg/L × 0.19 m³/s):
-    dbo5             calibrado =  32.75 mg/L
-    oxigeno_disuelto calibrado =   4.44 mg/L
+  Vertimientos (todos los de tipo VERTIMIENTO):
+    BY-PASS-VEOLIA  Q=0.270  DBO5=263.0  — dbo5, od, temperatura
+    VEOLIA          Q=0.190  DBO5= 32.75 — dbo5, od, temperatura
+    URBASER         Q=0.0015 DBO5=  1.8  — dbo5, od, temperatura
+    R. LA VEGA      Q=0.030  DBO5=  3.63 — dbo5, od, temperatura
+    Q. HONDA        Q=0.002  DBO5= 58.0  — dbo5, od, temperatura
+    R. PIEDRAS      Q=0.263  DBO5=  5.0  — dbo5, od, temperatura
 
   Condición de borde CABECERA (wq_data):
-    caudal           calibrado =   0.029 m³/s
-    dbo5             calibrado =   2.5   mg/L
-    oxigeno_disuelto calibrado =   6.2   mg/L
-    temperatura      calibrado =  17.6   °C
-    pH               calibrado =   7.1
+    caudal, dbo5, oxigeno_disuelto, temperatura, pH
 """
 
 import sys
@@ -155,6 +147,138 @@ parametros = [
         tipo          = "absoluto",
     ),
 
+    # ── URBASER (PTAR pequeña, carga baja) ───────────────────────────────
+    # Q=0.0015 m³/s, DBO5=1.8 mg/L — efluente tratado, rango acotado.
+
+    ParametroSensibilidad(
+        nombre        = "dbo5_urbaser",
+        categoria     = "fuente",
+        campo         = "dbo5",
+        nombre_fuente = "URBASER TUNJA S.A E.S.P",
+        minimo        = 0.5,     # mg/L — calibrado: 1.8
+        maximo        = 30.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "od_urbaser",
+        categoria     = "fuente",
+        campo         = "oxigeno_disuelto",
+        nombre_fuente = "URBASER TUNJA S.A E.S.P",
+        minimo        = 1.0,     # mg/L — calibrado: 4.83
+        maximo        = 8.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "temp_urbaser",
+        categoria     = "fuente",
+        campo         = "temperatura",
+        nombre_fuente = "URBASER TUNJA S.A E.S.P",
+        minimo        = 14.0,    # °C — calibrado: 18.4
+        maximo        = 25.0,
+        tipo          = "absoluto",
+    ),
+
+    # ── R. LA VEGA (afluente natural, aguas limpias) ──────────────────────
+    # Q=0.03 m³/s, DBO5=3.63 mg/L — rango acotado por ser afluente natural.
+
+    ParametroSensibilidad(
+        nombre        = "dbo5_la_vega",
+        categoria     = "fuente",
+        campo         = "dbo5",
+        nombre_fuente = "R. LA VEGA ",          # ojo: espacio al final
+        minimo        = 1.0,     # mg/L — calibrado: 3.63
+        maximo        = 15.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "od_la_vega",
+        categoria     = "fuente",
+        campo         = "oxigeno_disuelto",
+        nombre_fuente = "R. LA VEGA ",
+        minimo        = 3.0,     # mg/L — calibrado: 5.5
+        maximo        = 9.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "temp_la_vega",
+        categoria     = "fuente",
+        campo         = "temperatura",
+        nombre_fuente = "R. LA VEGA ",
+        minimo        = 12.0,    # °C — calibrado: 17.3
+        maximo        = 22.0,
+        tipo          = "absoluto",
+    ),
+
+    # ── Q. HONDA (alta DBO5 relativa, caudal pequeño) ────────────────────
+    # Q=0.002 m³/s, DBO5=58 mg/L — rango amplio en DBO5.
+
+    ParametroSensibilidad(
+        nombre        = "dbo5_honda",
+        categoria     = "fuente",
+        campo         = "dbo5",
+        nombre_fuente = "Q. HONDA",
+        minimo        = 10.0,    # mg/L — calibrado: 58
+        maximo        = 200.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "od_honda",
+        categoria     = "fuente",
+        campo         = "oxigeno_disuelto",
+        nombre_fuente = "Q. HONDA",
+        minimo        = 0.5,     # mg/L — calibrado: 3.55
+        maximo        = 7.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "temp_honda",
+        categoria     = "fuente",
+        campo         = "temperatura",
+        nombre_fuente = "Q. HONDA",
+        minimo        = 13.0,    # °C — calibrado: 17.6
+        maximo        = 23.0,
+        tipo          = "absoluto",
+    ),
+
+    # ── R. PIEDRAS (segundo mayor caudal del tramo) ───────────────────────
+    # Q=0.263 m³/s, DBO5=5.0 mg/L — caudal alto, agua limpia.
+
+    ParametroSensibilidad(
+        nombre        = "dbo5_piedras",
+        categoria     = "fuente",
+        campo         = "dbo5",
+        nombre_fuente = "R. PIEDRAS",
+        minimo        = 1.0,     # mg/L — calibrado: 5.0
+        maximo        = 20.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "od_piedras",
+        categoria     = "fuente",
+        campo         = "oxigeno_disuelto",
+        nombre_fuente = "R. PIEDRAS",
+        minimo        = 3.0,     # mg/L — calibrado: 5.51
+        maximo        = 9.0,
+        tipo          = "absoluto",
+    ),
+
+    ParametroSensibilidad(
+        nombre        = "temp_piedras",
+        categoria     = "fuente",
+        campo         = "temperatura",
+        nombre_fuente = "R. PIEDRAS",
+        minimo        = 10.0,    # °C — calibrado: 15.5
+        maximo        = 20.0,
+        tipo          = "absoluto",
+    ),
+
     # ── Condición de borde — CABECERA ─────────────────────────────────────
     # Q = 0.029 m³/s es un caudal muy bajo (cabecera alta).
     # Rango basado en variabilidad estacional típica del río.
@@ -242,7 +366,7 @@ if __name__ == "__main__":
     df_srcc = analisis_sensibilidad(
         json_base    = JSON_BASE,
         parametros   = parametros,
-        n            = 100,        # 100 corridas LHS
+        n            = 150,        # con 26 parámetros se recomienda >= 150 corridas LHS
         output_dir   = OUTPUT_DIR,
         seed         = 42,
         n_workers    = 4,
