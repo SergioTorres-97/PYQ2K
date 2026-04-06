@@ -1,2 +1,28 @@
-django>=6.0
+# Dependencias de la interfaz web Django
+# Instalación: pip install -r webapp/requirements_web.txt
+# Actualizado: 2026-04-06
+
+# Web framework
+Django==6.0.3
 gunicorn
+asgiref==3.11.1
+sqlparse==0.5.5
+
+# Gráficas interactivas (webapp)
+plotly==6.6.0
+
+# ── Dependencias del núcleo qual2k ────────────────────────────────────────
+# Datos y cálculo
+numpy==2.3.5
+pandas==2.3.3
+scipy==1.16.3
+
+# Lectura de Excel
+openpyxl==3.1.5
+
+# Visualización
+matplotlib==3.10.7
+seaborn==0.13.2
+
+# Calibración (algoritmo genético)
+pygad==3.5.0
