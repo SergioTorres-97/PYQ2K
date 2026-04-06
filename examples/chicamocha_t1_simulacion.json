@@ -417,5 +417,13 @@
     "_comentario": "Solo los que difieren de defaults",
     "NINpmin": 0.05,
     "NIPpupmax": 0.001
+  },
+  "reach_rates": {
+    "_comentario": "Tasas cineticas calibradas para T1 (CABECERA -> LA REFORMA)",
+    "kaaa": [2.576395],
+    "kdc":  [1.490254],
+    "kn":   [0.001185],
+    "khp":  [1.095822],
+    "kdt":  [0.107661]
   }
 }

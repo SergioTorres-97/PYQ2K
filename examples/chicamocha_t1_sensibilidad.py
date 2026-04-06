@@ -7,10 +7,17 @@ Análisis de sensibilidad LHS / SRCC para el Río Chicamocha — Tramo T1
 Modelo base: D:/Proyecto_UB_2025/PYQ2K/data/templates/Chicamocha_T1/PlantillaBaseQ2K.xlsx
 JSON base  : examples/chicamocha_t1_simulacion.json
 
-Parámetros variados (26 en total)
+Parámetros variados (31 en total)
 -----------------------------------
   Hidráulicos (1 tramo):
     alpha_1, beta_1, alpha_2, beta_2
+
+  Tasas cinéticas por tramo (reach_rates):
+    kaaa  — reaireación       (calibrado: 2.576)
+    kdc   — oxidación DBO r.  (calibrado: 1.490)
+    kn    — nitrificación     (calibrado: 0.001185)
+    khp   — hidrólisis P org. (calibrado: 1.096)
+    kdt   — disolución detrito(calibrado: 0.108)
 
   Vertimientos (todos los de tipo VERTIMIENTO):
     BY-PASS-VEOLIA  Q=0.270  DBO5=263.0  — dbo5, od, temperatura
@@ -88,6 +95,60 @@ parametros = [
         minimo    = 0.05,    # valor calibrado: 0.1403
         maximo    = 0.45,
         tipo      = "absoluto",
+    ),
+
+    # ── Tasas cinéticas por tramo (reach_rates) ──────────────────────────
+    # tipo="relativo": el valor muestreado MULTIPLICA al calibrado.
+    # Rango [0.5, 2.0] → explorar desde la mitad hasta el doble del calibrado.
+    # kaaa (reaireación): calibrado=2.576; rango físico amplio [0.5×, 3×].
+    # kdc  (oxidación DBO rápida): calibrado=1.490; muy sensible → rango amplio.
+    # kn   (nitrificación): calibrado=0.001185; controla NH4→NO3.
+    # khp  (hidrólisis P org.): calibrado=1.096.
+    # kdt  (disolución detrito): calibrado=0.108.
+
+    ParametroSensibilidad(
+        nombre    = "kaaa",
+        categoria = "reach_rates",
+        campo     = "kaaa",
+        minimo    = 0.5,
+        maximo    = 3.0,
+        tipo      = "relativo",    # factor × 2.576 calibrado
+    ),
+
+    ParametroSensibilidad(
+        nombre    = "kdc",
+        categoria = "reach_rates",
+        campo     = "kdc",
+        minimo    = 0.3,
+        maximo    = 3.0,
+        tipo      = "relativo",    # factor × 1.490 calibrado
+    ),
+
+    ParametroSensibilidad(
+        nombre    = "kn",
+        categoria = "reach_rates",
+        campo     = "kn",
+        minimo    = 0.3,
+        maximo    = 3.0,
+        tipo      = "relativo",    # factor × 0.001185 calibrado
+    ),
+
+    ParametroSensibilidad(
+        nombre    = "khp",
+        categoria = "reach_rates",
+        campo     = "khp",
+        minimo    = 0.3,
+        maximo    = 3.0,
+        tipo      = "relativo",    # factor × 1.096 calibrado
+    ),
+
+    ParametroSensibilidad(
+        nombre    = "kdt",
+        categoria = "reach_rates",
+        campo     = "kdt",
+        minimo    = 0.3,
+        maximo    = 3.0,
+        tipo      = "relativo",    # factor × 0.108 calibrado
     ),
 
     # ── BY-PASS-VEOLIA (mayor carga DBO del tramo) ────────────────────────
@@ -366,7 +427,7 @@ if __name__ == "__main__":
     df_srcc = analisis_sensibilidad(
         json_base    = JSON_BASE,
         parametros   = parametros,
-        n            = 150,        # con 26 parámetros se recomienda >= 150 corridas LHS
+        n            = 200,        # con 31 parámetros se recomienda >= 200 corridas LHS
         output_dir   = OUTPUT_DIR,
         seed         = 42,
         n_workers    = 4,

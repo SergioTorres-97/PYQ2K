@@ -107,6 +107,17 @@ if str(_ROOT) not in sys.path:
 _CAMPOS_REACH    = {"alpha_1", "beta_1", "alpha_2", "beta_2"}
 _CAMPOS_FUENTE   = {"dbo5", "oxigeno_disuelto", "temperatura", "pH", "caudal"}
 _CAMPOS_CABECERA = {"caudal", "dbo5", "oxigeno_disuelto", "temperatura", "pH"}
+# Nombres cortos aceptados en reach_rates (aliases de json_loader + kaaa)
+_CAMPOS_REACH_RATES = {
+    "kaaa",
+    "vss", "khc", "kdcs", "kdc",
+    "khn", "von", "kn",
+    "ki", "vdi",
+    "khp", "vop", "vip",
+    "kga", "krea", "kexa", "kdea", "va",
+    "kgaF", "kreaF", "kexaF", "kdeaF",
+    "kdt", "vdt", "ffast",
+}
 
 # ---------------------------------------------------------------------------
 # Variables de salida de QUAL2K incluidas en el análisis
@@ -136,13 +147,16 @@ class ParametroSensibilidad:
     Atributos comunes
     -----------------
     nombre          : Identificador único (columna en la tabla de resultados).
-    categoria       : "reach" | "fuente" | "cabecera"
+    categoria       : "reach" | "fuente" | "cabecera" | "reach_rates"
     campo           : Campo JSON a modificar.
-                        reach    → "alpha_1", "beta_1", "alpha_2", "beta_2"
-                        fuente   → "dbo5", "oxigeno_disuelto", "temperatura",
-                                   "pH", "caudal"
-                        cabecera → "caudal", "dbo5", "oxigeno_disuelto",
-                                   "temperatura", "pH"
+                        reach       → "alpha_1", "beta_1", "alpha_2", "beta_2"
+                        fuente      → "dbo5", "oxigeno_disuelto", "temperatura",
+                                      "pH", "caudal"
+                        cabecera    → "caudal", "dbo5", "oxigeno_disuelto",
+                                      "temperatura", "pH"
+                        reach_rates → "kaaa", "kdc", "kn", "khp", "kdt",
+                                      "kdcs", "vss", "khc", …  (nombres cortos
+                                      de la sección reach_rates del JSON)
     minimo          : Límite inferior del rango uniforme.
     maximo          : Límite superior del rango uniforme.
     tipo            : "absoluto" → el valor muestreado REEMPLAZA al base.
@@ -194,10 +208,15 @@ class ParametroSensibilidad:
                 f"[{self.nombre}] campo='{self.campo}' no válido para 'cabecera'. "
                 f"Permitidos: {sorted(_CAMPOS_CABECERA)}"
             )
-        if self.categoria not in {"reach", "fuente", "cabecera"}:
+        if self.categoria == "reach_rates" and self.campo not in _CAMPOS_REACH_RATES:
+            raise ValueError(
+                f"[{self.nombre}] campo='{self.campo}' no válido para 'reach_rates'. "
+                f"Permitidos: {sorted(_CAMPOS_REACH_RATES)}"
+            )
+        if self.categoria not in {"reach", "fuente", "cabecera", "reach_rates"}:
             raise ValueError(
                 f"[{self.nombre}] categoria='{self.categoria}' no reconocida. "
-                f"Usar 'reach', 'fuente' o 'cabecera'."
+                f"Usar 'reach', 'fuente', 'cabecera' o 'reach_rates'."
             )
         if self.tipo not in {"absoluto", "relativo"}:
             raise ValueError(
@@ -297,6 +316,37 @@ def _mod_cabecera(config: dict, param: ParametroSensibilidad, valor: float):
         config.setdefault("simulacion", {})["q_cabecera"] = nuevo
 
 
+def _mod_reach_rates(config: dict, param: ParametroSensibilidad, valor: float):
+    rr = config.get("reach_rates")
+    if rr is None:
+        raise ValueError(
+            f"[{param.nombre}] El JSON no tiene la sección 'reach_rates'. "
+            f"Agregá la sección con los valores calibrados por tramo."
+        )
+    campo = param.campo
+    if campo not in rr:
+        raise KeyError(
+            f"[{param.nombre}] La tasa '{campo}' no existe en 'reach_rates'. "
+            f"Claves disponibles: {sorted(k for k in rr if not k.startswith('_'))}"
+        )
+    valores = rr[campo]
+    # Scalar en el JSON → convertir a lista
+    n = len(config.get("reaches", []))
+    if not isinstance(valores, list):
+        valores = [float(valores)] * n
+        rr[campo] = valores
+
+    indices = param.tramos if param.tramos is not None else list(range(len(valores)))
+    for i in indices:
+        if i >= len(valores):
+            raise IndexError(
+                f"[{param.nombre}] Índice de tramo {i} fuera de rango "
+                f"(total={len(valores)})."
+            )
+        base = float(valores[i]) if valores[i] is not None else 0.0
+        valores[i] = _aplicar_valor(base, valor, param.tipo)
+
+
 def _modificar_config(config: dict, param: ParametroSensibilidad, valor: float):
     if param.categoria == "reach":
         _mod_reach(config, param, valor)
@@ -304,6 +354,8 @@ def _modificar_config(config: dict, param: ParametroSensibilidad, valor: float):
         _mod_fuente(config, param, valor)
     elif param.categoria == "cabecera":
         _mod_cabecera(config, param, valor)
+    elif param.categoria == "reach_rates":
+        _mod_reach_rates(config, param, valor)
 
 
 # ===========================================================================
@@ -316,6 +368,8 @@ def _worker_corrida(args: tuple):
 
     Recibe  : (run_id, config_dict, run_dir)
     Retorna : dict con run_id, exito y medias espaciales de variables de salida.
+
+    Usa Q2KJsonLoader + Q2KModel directamente (sin depender de run_from_json).
     """
     run_id, config_dict, run_dir = args
 
@@ -333,14 +387,35 @@ def _worker_corrida(args: tuple):
         with open(json_path, "w", encoding="utf-8") as fh:
             json.dump(config_dict, fh, indent=2, ensure_ascii=False)
 
-        from scripts.run_from_json import run_simulacion
+        from qual2k.processing.json_loader import Q2KJsonLoader
+        from qual2k.core.model import Q2KModel
 
-        data_exp = run_simulacion(
-            json_path=json_path,
-            generar_graficas=False,
-            calcular_metricas=False,
-            verbose=False,
+        loader = Q2KJsonLoader(json_path).cargar()
+
+        model = Q2KModel(
+            filepath=loader.header_dict["filedir"],
+            header_dict=loader.header_dict,
         )
+        model.data_reaches = loader.data_reaches
+        model.data_sources = loader.data_sources
+        model.data_wq      = loader.data_wq
+
+        if loader.rates_override:
+            model.config.actualizar_rates(**loader.rates_override)
+        if loader.light_override:
+            model.config.actualizar_light(**loader.light_override)
+
+        model.configurar_modelo(
+            numelem_default=loader.numelem_default,
+            q_cabecera=loader.q_cabecera,
+            estacion_cabecera=loader.estacion_cabecera,
+            reach_rates_custom=loader.reach_rates_custom,
+        )
+
+        model.generar_archivo_q2k()
+        model.ejecutar_simulacion()
+
+        data_exp = model.analizar_resultados(generar_graficas=False)
 
         if data_exp is None or data_exp.empty:
             return {"run_id": run_id, "exito": False, "medias": {}}
@@ -688,7 +763,7 @@ def _graficar_tornado(
         if serie.empty:
             continue
         fig, ax = plt.subplots(figsize=(7, max(3, 0.45 * len(serie))))
-        colores = ["#d73027" if v < 0 else "#4575b4" for v in serie.values]
+        colores = ["#4575b4" if v < 0 else "#d73027" for v in serie.values]
         ax.barh(serie.index, serie.values, color=colores, edgecolor="white", height=0.6)
         ax.axvline(0, color="black", lw=0.8)
         ax.set_xlabel("SRCC  (Spearman Rank Correlation Coefficient)", fontsize=9)
@@ -731,7 +806,7 @@ def _graficar_heatmap(
     ax.set_yticks(range(len(df_plot)))
     ax.set_yticklabels(df_plot.index, fontsize=8)
     ax.set_title(
-        "Índices de sensibilidad (SRCC)\nazul = directa · rojo = inversa",
+        "Índices de sensibilidad (SRCC)\nrojo = directa · azul = inversa",
         fontsize=9,
     )
 
